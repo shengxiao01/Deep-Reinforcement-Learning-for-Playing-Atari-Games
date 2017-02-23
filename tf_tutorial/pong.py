@@ -94,7 +94,6 @@ else:
     saver = tf.train.Saver(tf.all_variables())
     episode_number = int(load_path.split('-')[-1])
 
-
 # training loop
 while True:
 #     if True: env.render()

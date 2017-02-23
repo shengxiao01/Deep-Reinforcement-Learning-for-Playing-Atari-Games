@@ -4,7 +4,7 @@ import numpy as np
 
 #%%
 class DQNet():
-    def __init__(self,input_size = (84, 84, 4), action_space = 2):
+    def __init__(self,input_size = (80, 80, 4), action_space = 2):
 
         self.input_x, self.input_y, self.input_frame= input_size
         self.action_space = action_space
@@ -25,7 +25,7 @@ class DQNet():
         self.dqn_conv1_out = tf.nn.conv2d(self.dqn_input, 
                                           self.dqn_conv1_W, 
                                           self.dqn_conv1_strides, 
-                                          padding = 'VALID')
+                                          padding = 'SAME')
         self.dqn_conv1_out = tf.nn.relu(self.dqn_conv1_out)
         
         # conv layer 2, 4*4*64 filters, 2 stride
@@ -91,7 +91,7 @@ class DQNet():
  #%%       
 batch_size = 32
 
-input_img = np.random.random_sample((batch_size, 84, 84, 4)).astype('float32')
+input_img = np.random.random_sample((batch_size, 80, 80, 4)).astype('float32')
 
 true_label = np.random.randint(0, 2, size = (batch_size)).astype('float32')
 action = np.random.randint(0, 2, size = (batch_size)).astype('int32')
@@ -108,7 +108,7 @@ tf.global_variables_initializer().run()
 #%%
 for i in range(1):
     sess.run(mainQN.update, feed_dict={
-            mainQN.dqn_input: input_img + 0.05* np.random.random_sample((batch_size, 84, 84, 4)).astype('float32'),
+            mainQN.dqn_input: input_img + 0.05* np.random.random_sample((batch_size, 80, 80, 4)).astype('float32'),
             mainQN.target_label: true_label_onehot,
             mainQN.actions: action})
     predicted_label = sess.run(mainQN.predict, feed_dict={mainQN.dqn_input: input_img})
