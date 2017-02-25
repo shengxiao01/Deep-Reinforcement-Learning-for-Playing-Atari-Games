@@ -1,6 +1,7 @@
 #%%
 import tensorflow as tf
 import numpy as np
+import random
 import gym
 import matplotlib.pyplot as plt
 
@@ -8,13 +9,13 @@ DEBUG = True
 
 
 RENDER = False  # if displaying game graphics real time
-LEARNING_RATE = 0.0001 
+LEARNING_RATE = 0.001 
 
 IMG_X, IMG_Y = 80, 80
 
 #%% Deep Q-Network Structure
 class DQNet():
-    def __init__(self,input_size = (80, 80, 4), action_space = 2):
+    def __init__(self,input_size = (80, 80, 4), action_space = 3):
 
         self.input_x, self.input_y, self.input_frame= input_size
         self.action_space = action_space
@@ -91,13 +92,14 @@ class DQNet():
         
         ###########################################################
         # prediction, loss, and update
+        
         self.predict = tf.argmax(self.dqn_ff2_out, 1)
         
         self.targetQ = tf.placeholder(shape=[None],dtype=tf.float32)
         
         self.actions = tf.placeholder(shape=[None],dtype=tf.int32)
         
-        self.actions_onehot = tf.one_hot(self.actions, 2, dtype=tf.float32)
+        self.actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
         
         self.Q = tf.reduce_sum((self.dqn_ff2_out * self.actions_onehot), 
                                reduction_indices=1)
@@ -131,14 +133,14 @@ class replayMemory():
         self.__counter = self.__counter % self.__size
      
     def makeBatch(self, idx):  
-        return (self.frames[idx, :, :, 0:4], self.frames[idx, :, :, 1:5], self.actions[idx], self.rewards[idx])
+        return (self.frames[idx, :, :, 0:4], self.frames[idx, :, :, 1:5], self.actions[idx], self.rewards[idx], self.done[idx])
 
 #%% utility functions
 
 def process_frame(frame):
     # input a single frame
     # crop & downsample & average over 3 color channels 
-    return np.mean(observation[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32')
+    return np.mean(observation[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
  
 #%% initialize and running the model 
 
@@ -146,7 +148,7 @@ def process_frame(frame):
 # initialize parameter
 max_episode = 2
 max_frame = 1000
-random_action_prob = 0.1
+
 frame_skip = 4
 reward_decay = 0.99
 
@@ -169,7 +171,6 @@ while True:
     
     # reset the game environment, take a initial screen shot
     observation = env.reset()
-    
     # the state of current game play, 0:2 is 3 previous frame,
     # 3 is the current frame, 4 is the frame after action
     state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
@@ -194,7 +195,6 @@ while True:
                 
         if done:
             print("Episode finished after {} timesteps".format(t+1))
-            print(reward)
             break
     
     if buffer_counter > buffer_size:
@@ -202,39 +202,56 @@ while True:
         
 
 env.close()
-#%% initialize tensorflow
+  
+#%%
+###################################################################
+# training 
+action_space = 3  # possible action = 1, 2, 3; still, up, down
+
+max_episode = 21
+max_frame = 1000
+batch_size = 32
+running_reward = None
+future_reward_discount = 0.99
+random_action_prob = 0.1
+
+save_frequency = 50
+save_path = "/home/shengx/Documents/CheckpointData/"
+
+
 
 tf.reset_default_graph()
 Atari_AI = DQNet()
 Atari_AI.build_nn()
 
-# Add an op to initialize the variables.
-init_op = tf.global_variables_initializer()
 
+init_op = tf.global_variables_initializer()
+sess = tf.Session()
 saver = tf.train.Saver()
 
+sess.run(init_op)
 
-with tf.Session() as sess:
-  sess.run(init_op)
-  try:
-      saver.restore(sess, "./model.ckpt")
-      print("Session restored...")
-  except:
-      save_path = saver.save(sess, "./model.ckpt")
-      print("Session saved...")
-  
-sess.close()
-  
-#%%
-###################################################################
-# training 
-  
-  
-for i_episode in range(max_episode):
+try:
+    ckpt = tf.train.get_checkpoint_state(save_path)
+    load_path = ckpt.model_checkpoint_path
+    saver.restore(sess, load_path)
+    print("Session restored...")
+except:
+    print("Nothing to restore...")
+
+
+i_episode = 0
+
+
+while True:
+    
+    i_episode += 1
+    
     observation = env.reset()
     
     state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
     state[:,:,-1] = process_frame(observation)
+    reward_sum = 0
     
     for t in range(max_frame):
         if RENDER:
@@ -242,14 +259,16 @@ for i_episode in range(max_episode):
         # select an action based on the action-value function Q
         if np.random.random_sample() > random_action_prob:
             # use model to predict action
-            action = 2
+            action = sess.run(Atari_AI.predict,
+                              feed_dict = {Atari_AI.dqn_input: np.expand_dims(state[:,:,1:5], axis = 0)})
         else: 
             # random action
-            action = env.action_space.sample()
+            action = random.randint(1, 3) # random sample action from 1 to 3
         
         # excute the action for a few steps
         for _ in range(frame_skip):
             observation, reward, done, info = env.step(action)
+            reward_sum += reward
             if done:
                 break
         
@@ -260,18 +279,34 @@ for i_episode in range(max_episode):
         memory_buffer.add(state, action, reward, done)
         
         # randomly sample minibatch from memory
-        
+        batch_sample_index = random.sample(range(buffer_size), batch_size)
+        state_current, state_future, actions, current_rewards, end_game = memory_buffer.makeBatch(batch_sample_index)
+        future_rewards = sess.run(Atari_AI.dqn_ff2_out,
+                                  feed_dict = {Atari_AI.dqn_input: state_future})
+        targetQ = current_rewards + future_reward_discount * (1 - end_game) * np.amax(future_rewards, axis = 1)
         
         # update the target-value function Q
-        
+        sess.run(Atari_AI.update, feed_dict = {
+                Atari_AI.dqn_input: state_current,
+                Atari_AI.actions: actions,
+                Atari_AI.targetQ: targetQ})
         
         # every C step reset Q' = Q
         
         
         # save the model after every 200 updates       
         if done:
-            print("Episode finished after {} timesteps".format(t+1))
+            running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+            
+            if i_episode % 10 == 0:
+                print('ep {}: reward: {}, mean reward: {:3f}'.format(i_episode, reward_sum, running_reward))
+            else:
+                print('\tep {}: reward: {}'.format(i_episode, reward_sum))
+                
+                
+            if i_episode % save_frequency == 0:
+                saver.save(sess, save_path+'model-'+str(i_episode)+'.cptk')
+                print("SAVED MODEL #{}".format(i_episode))   
+                
+            
             break
-#%%
-            
-            
