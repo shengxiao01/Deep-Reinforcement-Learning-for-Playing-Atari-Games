@@ -140,7 +140,7 @@ class replayMemory():
 def process_frame(frame):
     # input a single frame
     # crop & downsample & average over 3 color channels 
-    return np.mean(observation[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
+    return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
  
 #%% initialize and running the model 
 
@@ -213,7 +213,9 @@ max_frame = 1000
 batch_size = 32
 running_reward = None
 future_reward_discount = 0.99
-random_action_prob = 0.1
+random_action_prob = 0.9
+rand_prob_step = (0.9 - 0.1)/5000
+
 
 save_frequency = 50
 save_path = "/home/shengx/Documents/CheckpointData/"
@@ -257,14 +259,15 @@ while True:
         if RENDER:
             env.render()
         # select an action based on the action-value function Q
-        if np.random.random_sample() > random_action_prob:
+        if np.random.random_sample() < random_action_prob:
             # use model to predict action
             action = sess.run(Atari_AI.predict,
-                              feed_dict = {Atari_AI.dqn_input: np.expand_dims(state[:,:,1:5], axis = 0)})
+                              feed_dict = {Atari_AI.dqn_input: np.expand_dims(state[:,:,1:5], axis = 0)})[0]
         else: 
             # random action
             action = random.randint(1, 3) # random sample action from 1 to 3
-        
+        random_action_prob -= rand_prob_step
+        random_action_prob = max(random_action_prob, 0.1)
         # excute the action for a few steps
         for _ in range(frame_skip):
             observation, reward, done, info = env.step(action)
