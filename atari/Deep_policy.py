@@ -120,7 +120,7 @@ class PNet():
         self.actions = tf.placeholder(tf.int32, shape=[None])
         
         self.actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
-        self.neg_log_prob =  tf.multiply(-self.actions_onehot * tf.log(self.output), tf.reshape(self.advantage, [-1, 1]))
+        self.neg_log_prob =  tf.multiply(-self.actions_onehot * tf.log(self.output + 1e-10), tf.reshape(self.advantage, [-1, 1]))
         self.loss = tf.reduce_mean(self.neg_log_prob)
         
         self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)

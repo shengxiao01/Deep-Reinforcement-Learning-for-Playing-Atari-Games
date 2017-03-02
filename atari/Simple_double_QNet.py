@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Feb 26 09:56:10 2017
-
 @author: shengx
 """
 
@@ -21,22 +20,36 @@ LEARNING_RATE = 0.0001
 
 IMG_X, IMG_Y = 80, 80
 
-
 action_space = 3  # possible action = 1, 2, 3; still, up, down
 
-max_episode = 21
-max_frame = 10000
-batch_size = 32
-running_reward = None
-future_reward_discount = 0.99
-random_action_prob = 0.9
-rand_prob_step = (0.9 - 0.1)/5000
-buffer_size = 100
-frame_skip = 2
+if DEBUG:
+    LEARNING_RATE = 0.001
+    max_episode = 21
+    max_frame = 1000
+    batch_size = 32
+    running_reward = None
+    future_reward_discount = 0.99
+    random_action_prob = 0.9
+    rand_prob_step = (0.9 - 0.1)/2000
+    buffer_size = 1000
+    frame_skip = 2
+    sync_freq = 1000
+    save_freq = 10
+else:
+    max_episode = 21
+    max_frame = 10000
+    batch_size = 32
+    running_reward = None
+    future_reward_discount = 0.99
+    random_action_prob = 0.9
+    rand_prob_step = (0.9 - 0.1)/10000
+    buffer_size = 10000
+    frame_skip = 2
+    sync_freq = 2000
+    save_freq = 200
 
 
-save_frequency = 100
-save_path = "/home/shengx/Documents/CheckpointData_policy/"
+save_path = "./"
 
 #%% Deep Q-Network Structure
 class DQNet():
@@ -57,13 +70,7 @@ class DQNet():
         self.b1 = tf.Variable(tf.truncated_normal([1, 512], stddev = 0.1))
         self.hidden = tf.nn.relu(tf.matmul(tf.reshape(self.input,[-1, 6400]), self.W1) + self.b1)
         self.W2 = tf.Variable(tf.truncated_normal([512, 3], stddev = 0.1))
-        self.b2 = tf.Variable(tf.truncated_normal([1, 3], stddev = 0.1))
-        
-        #        self.W1 = tf.get_variable('W1', [6400, 512])
-        #        self.b1 = tf.get_variable('b1', [1, 512])
-        #        self.hidden = tf.nn.relu(tf.matmul(tf.reshape(self.input,[-1, 6400]), self.W1) + self.b1)
-        #        self.W2 = tf.get_variable('W2', [512, 3])
-        #        self.b2 = tf.get_variable('b2', [1, 3])        
+        self.b2 = tf.Variable(tf.truncated_normal([1, 3], stddev = 0.1))       
         
         self.output = tf.matmul(self.hidden, self.W2) + self.b2
         ###########################################################
@@ -146,6 +153,9 @@ class DQNet():
 
         self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)
 
+    def variable_list(self):
+        return [self.W1, self.b1, self.W2, self.b2]
+
 #%% utility functions
 
 class replayMemory():
@@ -179,6 +189,11 @@ def process_frame(frame):
     # crop & downsample & average over 3 color channels 
     return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
  
+def copy_variables(from_nn, to_nn, sess):   
+    for i in range(len(from_nn)):
+        op = to_nn[i].assign(from_nn[i].value())
+        sess.run(op)
+
 
 #%%
 ###################################################################
@@ -261,6 +276,7 @@ except:
 
 # start training
 i_episode = 0
+steps = 0
 while True:
     
     i_episode += 1
@@ -311,16 +327,22 @@ while True:
         targetQ = current_rewards + future_reward_discount * (1 - end_game) * np.amax(future_rewards, axis = 1)
         
         # update the target-value function Q
+        steps += 1
         sess.run(Atari_AI_primary.update, feed_dict = {
                 Atari_AI_primary.input: np.expand_dims(state_current, axis = 3),
                 Atari_AI_primary.actions: actions,
                 Atari_AI_primary.targetQ: targetQ})
         
         # every C step reset Q' = Q
-        
+        if steps % sync_freq == 0:
+            primary_variables = Atari_AI_primary.variable_list()
+            target_variables = Atari_AI_target.variable_list()
+            copy_variables(primary_variables, target_variables, sess)
         
         # save the model after every 200 updates       
         if done:
+            running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+
             if DEBUG:
                 if i_episode % 10 == 0:
                     print('ep {}: reward: {}, mean reward: {:3f}'.format(i_episode, reward_sum, running_reward))
@@ -331,7 +353,7 @@ while True:
             if i_episode % 10 == 0:
                 reward_log.append(running_reward)
                 
-            if i_episode % save_frequency == 0:
+            if i_episode % save_freq == 0:
                 saver.save(sess, save_path+'model-'+str(i_episode)+'.cptk')
                 f = open(save_path + 'reward_log.cptk','wb')
                 pickle.dump(reward_log, f)

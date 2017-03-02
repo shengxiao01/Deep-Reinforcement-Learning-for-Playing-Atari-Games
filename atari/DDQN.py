@@ -34,6 +34,7 @@ if DEBUG:
     buffer_size = 1000
     frame_skip = 2
     sync_freq = 10
+    update_freq = 15
     save_freq = 5
 else:
     max_episode = 21
@@ -46,6 +47,7 @@ else:
     buffer_size = 10000
     frame_skip = 2
     sync_freq = 2000
+    update_freq = 20
     save_freq = 200
 
 
@@ -65,7 +67,7 @@ class DQNet():
         # assuming input to be batch_size*84*84*4
         self.input = tf.placeholder(tf.float32, shape=[None, self.input_x, self.input_y, self.input_frame])
 
-##########################################################
+        ##########################################################
         #[filter_height, filter_width, in_channels, out_channels]
         # conv layer 1, 8*8*32 filters, 4 stride
         self.conv1_W = tf.Variable(tf.truncated_normal([8, 8, self.input_frame, 32], 
@@ -275,6 +277,7 @@ except:
 # start training
 i_episode = 0
 steps = 0
+updates = 0
 while True:
     
     i_episode += 1
@@ -314,25 +317,29 @@ while True:
         
         memory_buffer.add(state, action, reward, done)
         
-        # randomly sample minibatch from memory
-        batch_sample_index = random.sample(range(buffer_size), batch_size)
-        state_current, state_future, actions, current_rewards, end_game = memory_buffer.makeBatch(batch_sample_index)
-        future_rewards = sess.run(Atari_AI_target.output,
-                                  feed_dict = {Atari_AI_target.input: state_future})
-        targetQ = current_rewards + future_reward_discount * (1 - end_game) * np.amax(future_rewards, axis = 1)
         
-        # update the target-value function Q
         steps += 1
-        sess.run(Atari_AI_primary.update, feed_dict = {
-                Atari_AI_primary.input: state_current,
-                Atari_AI_primary.actions: actions,
-                Atari_AI_primary.targetQ: targetQ})
+        if steps % update_freq == 0:
+            updates += 1
+            # randomly sample minibatch from memory
+            batch_sample_index = random.sample(range(buffer_size), batch_size)
+            state_current, state_future, actions, current_rewards, end_game = memory_buffer.makeBatch(batch_sample_index)
+            future_rewards = sess.run(Atari_AI_target.output,
+                                      feed_dict = {Atari_AI_target.input: state_future})
+            targetQ = current_rewards + future_reward_discount * (1 - end_game) * np.amax(future_rewards, axis = 1)
+            
+            # update the target-value function Q
+            sess.run(Atari_AI_primary.update, feed_dict = {
+                    Atari_AI_primary.input: state_current,
+                    Atari_AI_primary.actions: actions,
+                    Atari_AI_primary.targetQ: targetQ})
+                    # every C step reset Q' = Q
+            if updates % sync_freq == 0:
+                primary_variables = Atari_AI_primary.variable_list()
+                target_variables = Atari_AI_target.variable_list()
+                copy_variables(primary_variables, target_variables, sess)
         
-        # every C step reset Q' = Q
-        if steps % sync_freq == 0:
-            primary_variables = Atari_AI_primary.variable_list()
-            target_variables = Atari_AI_target.variable_list()
-            copy_variables(primary_variables, target_variables, sess)
+
         
         # save the model after every 200 updates       
         if done:
