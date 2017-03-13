@@ -25,13 +25,13 @@ action_space = 3  # possible action = 1, 2, 3; still, up, down
 if DEBUG:
     LEARNING_RATE = 0.0025
     max_episode = 21
-    max_frame = 3000
+    max_frame = 100000
     batch_size = 32
     running_reward = None
     future_reward_discount = 0.99
     random_action_prob = 0.9
-    rand_prob_step = (0.9 - 0.1)/60000
-    buffer_size = 60000
+    rand_prob_step = (0.9 - 0.1)/100000
+    buffer_size = 100000
     frame_skip = 2
     sync_freq = 2000
     update_freq = 5
