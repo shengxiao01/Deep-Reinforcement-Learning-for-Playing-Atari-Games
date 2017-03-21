@@ -25,15 +25,15 @@ action_space = 3  # possible action = 1, 2, 3; still, up, down
 if DEBUG:
     LEARNING_RATE = 0.0025
     max_episode = 21
-    max_frame = 100000
+    max_frame = 1000
     batch_size = 32
     running_reward = None
     future_reward_discount = 0.99
     random_action_prob = 0.9
-    rand_prob_step = (0.9 - 0.1)/100000
-    buffer_size = 100000
+    rand_prob_step = (0.9 - 0.1)/10000
+    buffer_size = 10000
     frame_skip = 2
-    sync_freq = 2000
+    sync_freq = 200
     update_freq = 5
     save_freq = 100
 else:
@@ -55,10 +55,11 @@ save_path = "./"
 
 #%% Deep Q-Network Structure
 class DQNet():
-    def __init__(self,input_size = (80, 80, 4), action_space = 3):
+    def __init__(self, scope, input_size = (80, 80, 4), action_space = 3):
 
         self.input_x, self.input_y, self.input_frame= input_size
         self.action_space = action_space
+        self.__scope = scope
 
     def build_nn(self):
         
@@ -156,7 +157,8 @@ class DQNet():
         self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)
 
     def variable_list(self):
-        return [self.conv1_W, self.conv1_b, self.conv2_W, self.conv2_b, self.conv3_W, self.conv3_b, self.ff1_W, self.ff1_b, self.advantage_W, self.value_W]
+        
+        return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
 
 #%% utility functions
 
@@ -192,9 +194,11 @@ def process_frame(frame):
     return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
  
 def copy_variables(from_nn, to_nn, sess):   
-    for i in range(len(from_nn)):
-        op = to_nn[i].assign(from_nn[i].value())
+    
+    for from_var, to_var in zip(from_nn, to_nn):
+        op = to_var.assign(from_var.value())
         sess.run(op)
+
 
 
 #%%
@@ -246,11 +250,13 @@ env = gym.make("Pong-v0")
 
 
 tf.reset_default_graph()
-Atari_AI_primary = DQNet()
-Atari_AI_primary.build_nn()
 
-Atari_AI_target = DQNet()
-Atari_AI_target.build_nn()
+with tf.variable_scope("Primary") as scope:
+    Atari_AI_primary = DQNet(scope)
+    Atari_AI_primary.build_nn()
+with tf.variable_scope("Target") as scope:
+    Atari_AI_target = DQNet(scope)
+    Atari_AI_target.build_nn()
 
 init_op = tf.global_variables_initializer()
 reward_log = []

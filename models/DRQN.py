@@ -24,19 +24,20 @@ IMG_X, IMG_Y = 80, 80
 action_space = 3  # possible action = 1, 2, 3; still, up, down
 
 if DEBUG:
-    LEARNING_RATE = 0.0025
+    LEARNING_RATE = 0.001
     max_episode = 21
     max_frame = 5000
     batch_size = 32
     temporal_length = 8
     running_reward = None
+    max_reward = None
     future_reward_discount = 0.99
     random_action_prob = 0.9
-    rand_prob_step = (0.9 - 0.1)/50000
-    buffer_size = 500
-    frame_skip = 2
+    rand_prob_step = (0.9 - 0.1)/10000
+    buffer_size = 80
+    frame_skip = 4
     sync_freq = 500
-    update_freq = 24
+    update_freq = 8
     save_freq = 100
 else:
     max_episode = 21
@@ -44,11 +45,12 @@ else:
     batch_size = 32
     temporal_length = 8
     running_reward = None
+    max_reward = None
     future_reward_discount = 0.99
     random_action_prob = 0.9
     rand_prob_step = (0.9 - 0.1)/1000000
-    buffer_size = 2000
-    frame_skip = 2
+    buffer_size = 5000
+    frame_skip = 4
     sync_freq = 1000
     update_freq = 24
     save_freq = 200
@@ -124,13 +126,14 @@ class DQNet():
         self.ff1_b = tf.Variable(tf.truncated_normal([1, 512],
                                                          stddev = 0.1))
         # output batch_size * 512
-        self.ff1_out = tf.nn.relu(tf.matmul(self.ff1_input, self.ff1_W) + self.ff1_b)
+        self.ff1_out = tf.matmul(self.ff1_input, self.ff1_W) + self.ff1_b
+        self.ff1_out = tf.nn.relu(self.ff1_out)
         
         ###########################################################
         # recurrent layer
         self.batch_size = tf.placeholder(tf.int32)
         self.rnn_in = tf.reshape(self.ff1_out,[self.batch_size, -1, 512])
-        self.rnn_cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_units = 512)
+        self.rnn_cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(num_units = 512)
         self.rnn_state_in = self.rnn_cell.zero_state(self.batch_size, tf.float32)
         self.rnn, self.rnn_state_out = tf.nn.dynamic_rnn(inputs = self.rnn_in,
                                                          cell = self.rnn_cell,
@@ -138,6 +141,7 @@ class DQNet():
                                                          initial_state = self.rnn_state_in)
         
         self.rnn_out = tf.reshape(self.rnn,shape=[-1,512])
+        #self.rnn_out = self.ff1_out
         
         ############################################################
         # split the network into two paths
@@ -169,11 +173,15 @@ class DQNet():
         self.Q = tf.reduce_sum((self.output * self.actions_onehot), 
                                reduction_indices=1)
         
-        self.loss = tf.reduce_mean(tf.square(self.targetQ - self.Q))
-        
         self.loss_mask = tf.placeholder(shape=[None], dtype=tf.float32)
+        
+        self.loss = tf.square(self.targetQ - self.Q) * self.loss_mask
 
-        self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss * self.loss_mask)
+        self.loss_clipped = tf.clip_by_value(self.loss, -1, 1)
+        
+        self.loss_sum = tf.reduce_mean(self.loss_clipped)
+        
+        self.update = tf.train.RMSPropOptimizer(learning_rate = LEARNING_RATE, momentum = 0.95).minimize(self.loss_sum)
 
     def variable_list(self):
         return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
@@ -211,8 +219,7 @@ class replayMemory():
         reward_sample = np.zeros((batch_size, temporal_length)).astype('float32')
         done_sample = np.zeros((batch_size, temporal_length)).astype('int32')
         
-        i = 0
-        for c_idx in idx:
+        for i, c_idx in enumerate(idx):
             
             sequence_start_idx = np.random.randint(0, len(self.actions[c_idx]) - temporal_length - 1)
             sequence_idx = np.array(range(sequence_start_idx, sequence_start_idx + temporal_length))
@@ -222,7 +229,6 @@ class replayMemory():
             action_sample[i, :] = self.actions[c_idx][sequence_idx]
             reward_sample[i, :] = self.rewards[c_idx][sequence_idx]
             done_sample[i, :] = self.done[c_idx][sequence_idx]
-            i += 1
         
         return (current_frame_sample, next_frame_sample, action_sample, reward_sample, done_sample)
 
@@ -292,10 +298,10 @@ env = gym.make("Pong-v0")
 
 
 tf.reset_default_graph()
-with tf.variable_scope("Primary") as scope:
+with tf.variable_scope("Primary", initializer=tf.truncated_normal_initializer(stddev = 0.1)) as scope:
     Atari_AI_primary = DQNet(scope)
     Atari_AI_primary.build_nn()
-with tf.variable_scope("Target") as scope:
+with tf.variable_scope("Target", initializer=tf.truncated_normal_initializer(stddev = 0.1)) as scope:
     Atari_AI_target = DQNet(scope)
     Atari_AI_target.build_nn()
 
@@ -330,6 +336,7 @@ except:
 i_episode = 0
 steps = 0
 updates = 0
+#%%
 while True:
     
     i_episode += 1
@@ -435,7 +442,7 @@ while True:
         # save the model after every 200 updates       
         if done:
             # an episode is done, update the memory buffer
-            memory_buffer.add(frame_sequence, action_sequence, reward_sequence, done_sequence)
+            memory_buffer.add(frame_sequence[0:t+1,:,:], action_sequence[0:t+1], reward_sequence[0:t+1], done_sequence[0:t+1])
             
             running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
 
@@ -450,9 +457,11 @@ while True:
                 reward_log.append(running_reward)
                 
             if i_episode % save_freq == 0:
-                saver.save(sess, save_path+'model-'+str(i_episode)+'.cptk')
-                f = open(save_path + 'reward_log.cptk','wb')
-                pickle.dump(reward_log, f)
-                f.close()
+                max_reward = running_reward if max_reward is None else max(max_reward, running_reward)
+                if max_reward == running_reward:
+                    saver.save(sess, save_path+'model-'+str(i_episode)+'.cptk')
+                    f = open(save_path + 'reward_log.cptk','wb')
+                    pickle.dump(reward_log, f)
+                    f.close()
                 
             break
