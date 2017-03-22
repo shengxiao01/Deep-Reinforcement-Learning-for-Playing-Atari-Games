@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Mar 20 21:12:38 2017
-
 @author: shengx
 """
 
@@ -132,9 +131,8 @@ class DQNet():
                                                          stddev = 0.01))
         self.policy_b = tf.Variable(tf.truncated_normal([1, self.action_space],
                                                          stddev = 0.01))
-        self.policy_out = tf.matmul(self.ff1_out, self.policy_W) + self.policy_b
-        
-        self.policy_out = tf.nn.softmax(self.policy_out)
+
+        self.policy_out = tf.nn.softmax(tf.matmul(self.ff1_out, self.policy_W) + self.policy_b)
         
         self.value_W = tf.Variable(tf.truncated_normal([512, 1],
                                                          stddev = 0.01))
@@ -180,11 +178,17 @@ class DQNet():
         
         ##########################################################
         # updates
-        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
-                 
-        self.optimzer = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE)
+                       
+        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate = LEARNING_RATE)
         
-        self.grad_var_pair = self.optimzer.compute_gradients(self.total_loss, self.variables)
+        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
+               
+        #self.grad_var_pair = self.optimizer.compute_gradients(self.total_loss, self.variables)
+        
+        self.grad = tf.gradients(self.total_loss, self.variables)
+        #self.gradients = [tf.Variable(tf.zeros_like(var), trainable=False) for var in self.variables]
+        
+        #op = self.optimizer.apply_gradients(grad_var_pair)
 
     def variable_list(self):
         
@@ -192,23 +196,34 @@ class DQNet():
     
     def apply_gradients(self, sess, gradients):
         
-        sess.run(self.optimzer.apply_gradients(self.grad_var_pair))
+        self.gradients = [tf.Variable(tf.zeros_like(var), trainable=False) for var in self.variables]
+        
+        grad_var_pair = [(self.gradients[i].assign(grad), var) for i, (grad,var) in enumerate(zip(gradients, self.variables))]                
+        
+        sess.run(self.optimizer.apply_gradients(grad_var_pair))
         
         
-    def sync_variables(self, from_variables):
+    def sync_variables(self, sess, from_scope):
+        
+        from_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=from_scope.name)
+        
         for from_var, to_var in zip(from_variables, self.variables):
             op = to_var.assign(from_var.value())
             sess.run(op)
+            
+    def return_scope(self):
+        
+        return self.__scope
 #%%
 
 tf.reset_default_graph()
 
 with tf.variable_scope("Primary") as scope:
-    Atari_AI_primary = DQNet(scope)
-    Atari_AI_primary.build_nn()
+    agent1 = DQNet(scope)
+    agent1.build_nn()
 with tf.variable_scope("Target") as scope:
-    Atari_AI_target = DQNet(scope)
-    Atari_AI_target.build_nn()
+    agent2 = DQNet(scope)
+    agent2.build_nn()
 
 
 init_op = tf.global_variables_initializer()
@@ -222,18 +237,21 @@ state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
 actions = [2]
 targetR = [0.25]
 
-action = sess.run(Atari_AI_primary.policy_out,
-                              feed_dict = {Atari_AI_primary.input: np.expand_dims(state[:,:,1:5], axis = 0)})
 
-grad_var_pair = sess.run(Atari_AI_primary.grad_var_pair, feed_dict = {
-                    Atari_AI_primary.input: np.expand_dims(state[:,:,1:5], axis = 0),
-                    Atari_AI_primary.actions: actions,
-                    Atari_AI_primary.R: targetR})
-grad = list(zip(*grad_var_pair))
-
-Atari_AI_primary.apply_gradients(sess, grad)
-    
-
+grad = sess.run((agent1.grad), feed_dict = {
+                    agent1.input: np.expand_dims(state[:,:,1:5], axis = 0),
+                    agent1.actions: actions,
+                    agent1.R: targetR})
+#%% just for testing
+grad = sess.run((agent1.grad), feed_dict = {
+                    agent1.input: np.expand_dims(state[:,:,1:5], axis = 0),
+                    agent1.actions: actions,
+                    agent1.R: targetR})
+agent1.apply_gradients(sess, grad)
+sess.run(agent1.total_loss, feed_dict = {
+                    agent1.input: np.expand_dims(state[:,:,1:5], axis = 0),
+                    agent1.actions: actions,
+                    agent1.R: targetR})
 #%% utility functions
 
 class replayMemory():
@@ -272,6 +290,144 @@ def copy_variables(from_nn, to_nn, sess):
     for from_var, to_var in zip(from_nn, to_nn):
         op = to_var.assign(from_var.value())
         sess.run(op)
+        
+###################################################################
+#%%
+class agent():
+    def __init__(self, scope_name):
+
+        with tf.variable_scope(scope_name) as scope:
+            self.local_agent = DQNet(scope)
+            self.local_agent.build_nn()
+            self.__scope = scope
+
+
+
+    def training(self, sess, coord, reward_decay):
+        # sync to global network parameters
+        grad = []
+        # initialize environment
+        env = gym.make("Pong-v0")
+        
+        while not coord.should_stop():
+            # reset gradient/ parameters
+            frame_sequence = []
+            action_sequence = []
+            reward_sequence = []
+            done_sequence = []
+
+            # reset game environment / state
+            observation = env.reset()
+            state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
+            state[:,:,-1] = process_frame(observation)
+            reward_sum = 0
+            # running game
+            for t in range(max_frame):
+                policy_prob= sess.run(self.local_agent.policy_out, 
+                                       feed_dict = {
+                                       self.local_agent.input: np.expand_dims(state[:,:,1:5], axis = 0)})
+                # choose an action according to policy
+                action = np.random.choice(3, p=np.squeeze(policy_prob))
+                
+                # take this action for certain steps and record the reward
+                reward = 0
+                for _ in range(frame_skip):
+                    observation, reward_temp, done, info = env.step(action + 1)
+                    reward += reward_temp
+                    if done:
+                        break
+                reward_sum += reward
+                
+                # record game progress
+                frame_sequence.append(state[:,:,-1])
+                action_sequence.append(action)
+                reward_sequence.append(reward)
+                done_sequence.append(done)
+
+                # update next game state
+                state = np.roll(state, -1, axis = 2)
+                state[:,:,-1] = process_frame(observation)
+
+                # back propagate reward and accumulate gradients
+                # check if indexings are correct
+                if done or t == (max_frame - 1):
+                    # initialize R
+                    R = [None] * (t + 1)
+                    # bootstrap from final state
+                    R[-1] = 0 if done else sess.run(self.local_agent.value_out,
+                                      feed_dict = {
+                                      self.local_agent.input: np.expand_dims(state[:,:,1:5], axis = 0)
+                                      })
+                        
+                    for i in range(t, -1, -1):
+                        if reward_sequence[i-1] != 0:  # specifically for pong game
+                            state_temp = np.concatenate(frame_sequence[i-4:i], axis = 2)
+                            R[i-1] = sess.run(self.local_agent.value_out,
+                                      feed_dict = {
+                                      self.local_agent.input: np.expand_dims(state_temp, axis = 0)
+                                      })
+                        else:
+                            R[i-1] = reward_sequence[i-1] + reward_decay * R[i]
+                        # accumulate gradient
+
+
+                    # apply gradient to global network 
+
+
+                    # save game after certain steps
+
+#%%
+# initialize tensorflow
+tf.reset_default_graph()
+# initialize global network
+global_agent = agent('global')
+# initialize local networks
+THREAD_NUM = 4
+local_agent = []
+for thread_id in range(THREAD_NUM):
+    local_scope = 'local'+str(thread_id)
+    local_agent.append(agent(local_scope))
+# initialize tensorflow 
+init_op = tf.global_variables_initializer()
+sess = tf.Session()
+coord = tf.train.Coordinator()
+sess.run(init_op)
+
+saver = tf.train.Saver()
+try:
+    ckpt = tf.train.get_checkpoint_state(save_path)
+    load_path = ckpt.model_checkpoint_path
+    saver.restore(sess, load_path)
+    f = open(save_path + 'reward_log.cptk','rb')
+    reward_log = pickle.load(f)
+    f.close()
+    random_action_prob = 0.1
+    print("Session restored...")
+except:
+    # sync variables for all local network
+
+    print("Nothing to restore...")
+
+
+# starting each local networks in different threads
+
+
+
+coord.join(threads)
+# end ...
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
