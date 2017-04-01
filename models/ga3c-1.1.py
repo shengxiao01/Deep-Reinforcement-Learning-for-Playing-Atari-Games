@@ -14,8 +14,7 @@ import tensorflow as tf
 import gym
 import time
 from matplotlib import pyplot as plt
-SAVE = False
-RESTORE = False
+
 #########################################################
 #%%
 # A class for A3C network
@@ -33,7 +32,7 @@ class A3CNet():
         # [batch, in_height, in_width, in_channels]
         # assuming input to be batch_size*84*84*4
         self.input = tf.placeholder(tf.float32, shape=[None, self.input_x, self.input_y, self.input_frame])
-        
+
         ##########################################################
         #[filter_height, filter_width, in_channels, out_channels]
         # conv layer 1, 8*8*32 filters, 4 stride
@@ -95,58 +94,9 @@ class A3CNet():
                                                          stddev = 0.01))
         self.policy_b = tf.Variable(tf.truncated_normal([1, self.action_space],
                                                          stddev = 0.01))
-        '''
-        ##########################################################
-        #[filter_height, filter_width, in_channels, out_channels]
-        # conv layer 1, 8*8*16 filters, 4 stride
-        self.conv1_W = tf.Variable(tf.truncated_normal([8, 8, self.input_frame, 16], 
-                                                           stddev = 0.01))
-        self.conv1_b = tf.Variable(tf.truncated_normal([1, 20, 20, 16], 
-                                                           stddev = 0.01))
-        self.conv1_strides = [1, 4, 4, 1]
-        #output 20*20*32 
-        self.conv1_out = tf.nn.conv2d(self.input, 
-                                          self.conv1_W, 
-                                          self.conv1_strides, 
-                                          padding = 'SAME') + self.conv1_b
-        self.conv1_out = tf.nn.relu(self.conv1_out)
-        
-        
-        ###########################################################
-        # conv layer 2, 4*4*32 filters, 2 stride
-        self.conv2_W = tf.Variable(tf.truncated_normal([4, 4, 16, 32],
-                                                           stddev = 0.01))
-        self.conv2_b = tf.Variable(tf.truncated_normal([1, 9, 9, 32], 
-                                                           stddev = 0.01))
-        self.conv2_strides = [1, 2, 2, 1]
-        # output 9*9*32
-        self.conv2_out = tf.nn.conv2d(self.conv1_out, 
-                                          self.conv2_W, 
-                                          self.conv2_strides, 
-                                          padding = 'VALID') + self.conv2_b
-        self.conv2_out = tf.nn.relu(self.conv2_out) 
-        
-        ###########################################################
-        # fully connected layer 1, (9*9*32 = 2596) * 512
-        self.ff1_input = tf.reshape(self.conv2_out, [-1, 2592])
-        self.ff1_W = tf.Variable(tf.truncated_normal([2592, 256],
-                                                         stddev = 0.01))
-        self.ff1_b = tf.Variable(tf.truncated_normal([1, 256],
-                                                         stddev = 0.01))
-        # output batch_size * 512
-        self.ff1_out = tf.matmul(self.ff1_input, self.ff1_W) + self.ff1_b
-        self.ff1_out = tf.nn.relu(self.ff1_out)
-        
-        '''
-        self.policy_W = tf.Variable(tf.truncated_normal([512, self.action_space],
-                                                         stddev = 0.01))
-        self.policy_b = tf.Variable(tf.truncated_normal([1, self.action_space],
-                                                         stddev = 0.01))        
-        
-        
-        ###########################################################
+
         self.policy_out = tf.nn.softmax(tf.matmul(self.ff1_out, self.policy_W) + self.policy_b)
-        #self.policy_out = tf.clip_by_value(self.policy_out, 0.05, 1)
+        #self.policy_out = tf.clip_by_value(self.policy_out, 0.01, 1)
         #self.policy_out = tf.div(self.policy_out, tf.reduce_sum(self.policy_out, axis = 1, keep_dims = True))
         
         self.value_W = tf.Variable(tf.truncated_normal([512, 1],
@@ -172,13 +122,13 @@ class A3CNet():
         
         self.action_policy = tf.reduce_sum(self.policy_out * self.actions_onehot, axis = 1)
         
-        self.policy_loss = -tf.log(self.action_policy + 1e-6) * (self.R - tf.stop_gradient(tf.reshape(self.value_out,[-1])))
+        self.policy_loss = -tf.log(self.action_policy + 1e-10) * (self.R - tf.stop_gradient(tf.reshape(self.value_out,[-1])))
         
         self.V_loss = tf.square(self.R - tf.reshape(self.value_out,[-1]))
         
-        self.entropy_loss = self.policy_out * tf.log(self.policy_out + 1e-6)
+        self.entropy_loss = self.policy_out * tf.log(self.policy_out + 1e-10)
         
-        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy_loss)
+        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0 * tf.reduce_sum(self.entropy_loss)
 
         ##########################################################
         # updates
@@ -188,7 +138,6 @@ class A3CNet():
                 decay=0.99,
                 momentum=0,
                 epsilon=0.1).minimize(self.total_loss)
-        
     def train(self, sess, states, actions, rewards):
         sess.run(self.update, feed_dict = {
                               self.input: states,
@@ -262,8 +211,6 @@ class Agent():
         
     def process_frame(self, frame):
         return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
-        #frame_gray = np.dot(frame[34:194:2, 0:160:2, :], [0.299, 0.587, 0.114]).astype(np.float32)
-        #return frame_gray/128 - 1
 
     def run(self):
 
@@ -333,7 +280,7 @@ class Predictor():
     def __init__(self, id):
         self.__id = id
         self.exit = False
-        self.prediction_batch_size = 12
+        self.prediction_batch_size = 8
 
     def start(self, sess, global_nn, agents, prediction_q):
         ids = np.zeros(self.prediction_batch_size, dtype='int32')
@@ -361,7 +308,7 @@ class Predictor():
 class Trainer():
     def __init__(self, id):
         self.__id = id
-        self.batch_size = 35
+        self.batch_size = 40
         self.exit = False
 
     def start(self, sess, global_nn, training_q, prediction_q):
@@ -419,14 +366,13 @@ class Logger():
         f.close()
     
     def start(self):
-        if RESTORE:
-            self.restore()
+        self.restore()
         
         agent_id, agent_ep, agent_reward = self.__log_q.get()
         self.running_reward = agent_reward
         self.global_episode += 1
         print('ep ', str(self.global_episode), ' reward ', str(agent_reward))
-
+        
         while not self.exit:
             agent_id, agent_ep, agent_reward = self.__log_q.get()
             self.global_episode += 1
@@ -437,7 +383,7 @@ class Logger():
                 print('ep ', str(self.global_episode), ' reward ', str(agent_reward), ' running_reward ', str(self.running_reward))
                 self.reward_log.append(self.running_reward)
                 
-            if SAVE and self.global_episode % self.save_freq == 0:
+            if self.global_episode % self.save_freq == 0:
                 self.save()
             
                 
@@ -464,7 +410,7 @@ log_q = Queue(maxsize = 128)
 
 #%%
 # setup Agent
-AGENT_NUM = 16
+AGENT_NUM = 8
 agents = []
 agents_process = []
 for agent_id in range(AGENT_NUM):
@@ -477,24 +423,18 @@ for agent_id in range(AGENT_NUM):
 train_thread = Trainer(0)
 predict_thread = Predictor(0)
 log_thread = Logger(0, sess, saver, log_q)
-train_thread2 = Trainer(0)
-predict_thread2 = Predictor(0)
 
 t1 = Thread(target = train_thread.start, args = (sess, global_nn, training_q, prediction_q))
 t1.Daemon = True
 t1.start()
 
-t4 = Thread(target = train_thread2.start, args = (sess, global_nn, training_q, prediction_q))
-t4.Daemon = True
-t4.start()
+
 
 t2 = Thread(target = predict_thread.start, args = (sess, global_nn, agents, prediction_q))
 t2.Daemon = True
 t2.start()
 
-t5 = Thread(target = predict_thread2.start, args = (sess, global_nn, agents, prediction_q))
-t5.Daemon = True
-t5.start()
+
 
 
 t3 = Thread(target = log_thread.start, args = ( ))
@@ -503,40 +443,5 @@ t3.start()
 
 
 
-#%%
 
-for (agent, p) in zip(agents, agents_process):
-    agent.exit = True
-    time.sleep(0.5)
-    p.terminate()
-train_thread.exit = True
-predict_thread.exit = True
-log_thread.exit = True
-train_thread2.exit = True
-predict_thread2.exit = True
-t1.join(1)
-t2.join(1)
-t3.join(1)
-t4.join(1)
-t5.join(1)
 
-#sess.close()
-
-#%% test code
-from matplotlib import pyplot as plt
-
-input_ = np.random.rand(1, 80, 80, 4)
-
-value, policy = sess.run([global_nn.value_out, global_nn.policy_out], feed_dict = {global_nn.input: input_})
-
-#plt.imshow(agents[0].state_current[0, :, :, -1])
-#%%
-
-env = gym.make("Pong-v0")
-state = np.zeros((1, 80, 80, 4), dtype = 'float32')
-
-#%%
-obs, _, _, _ = env.step(0)
-state[0,:,:,-2] = agents[0].process_frame(obs)
-plt.imshow(state[0,:,:,-3])
-value, policy = sess.run([global_nn.value_out, global_nn.policy_out], feed_dict = {global_nn.input: p})

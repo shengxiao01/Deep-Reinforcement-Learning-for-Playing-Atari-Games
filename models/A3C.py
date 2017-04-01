@@ -172,7 +172,7 @@ class DQNet():
         
         self.entropy_loss = self.policy_out * tf.log(self.policy_out + 1e-10)
         
-        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy)
+        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy_loss)
         
         ##########################################################
         # updates
