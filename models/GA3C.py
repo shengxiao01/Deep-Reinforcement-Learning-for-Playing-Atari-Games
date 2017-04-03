@@ -7,7 +7,7 @@ Created on Sat Mar 25 18:59:12 2017
 """
 
 import numpy as np
-from multiprocessing import Process, Queue, Value
+from multiprocessing import Process, Queue, Value, RawValue, Lock
 from threading import Thread
 import pickle
 import tensorflow as tf
@@ -522,21 +522,3 @@ t5.join(1)
 
 #sess.close()
 
-#%% test code
-from matplotlib import pyplot as plt
-
-input_ = np.random.rand(1, 80, 80, 4)
-
-value, policy = sess.run([global_nn.value_out, global_nn.policy_out], feed_dict = {global_nn.input: input_})
-
-#plt.imshow(agents[0].state_current[0, :, :, -1])
-#%%
-
-env = gym.make("Pong-v0")
-state = np.zeros((1, 80, 80, 4), dtype = 'float32')
-
-#%%
-obs, _, _, _ = env.step(0)
-state[0,:,:,-2] = agents[0].process_frame(obs)
-plt.imshow(state[0,:,:,-3])
-value, policy = sess.run([global_nn.value_out, global_nn.policy_out], feed_dict = {global_nn.input: p})

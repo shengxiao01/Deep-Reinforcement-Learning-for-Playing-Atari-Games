@@ -11,6 +11,8 @@ import numpy as np
 import random
 import gym
 import pickle
+import threading
+import time
 
 DEBUG = True
 
@@ -138,19 +140,6 @@ class DQNet():
                                                          stddev = 0.01))
         self.value_out = tf.matmul(self.ff1_out, self.value_W)        
         
-        #self.advantage_input,self.value_input = tf.split(self.ff1_out, 2, axis = 1)
-        #
-        #self.advantage_W = tf.Variable(tf.truncated_normal([256, self.action_space], 
-        #                                          stddev = 0.1))
-        #self.value_W = tf.Variable(tf.truncated_normal([256, 1],
-        #                                          stddev = 0.1))
-        #
-        #self.advantage_out = tf.matmul(self.advantage_input,self.advantage_W)
-        #
-        #self.value_out = tf.matmul(self.value_input,self.value_W)
-        
-        #Then combine them together to get our final Q-values.
-        #self.output = self.value_out + self.advantage_out - tf.reduce_mean(self.advantage_out,reduction_indices=1,keep_dims=True)
         ###########################################################
         # prediction, loss, and update
         
@@ -166,40 +155,26 @@ class DQNet():
         
         self.action_policy = tf.reduce_sum(self.policy_out * self.actions_onehot, axis = 1)
         
-        self.policy_loss = -tf.log(self.action_policy + 1e-10) * (self.R - tf.reshape(self.value_out,[-1]))
+        self.policy_entropy = tf.reduce_sum(self.policy_out * tf.log(self.policy_out + 1e-10))
         
-        self.V_loss = tf.square(self.R - tf.reshape(self.value_out,[-1]))
+        self.policy_loss = -tf.log(self.action_policy + 1e-6) * (self.R - tf.stop_gradient(tf.reshape(self.value_out,[-1])))
         
-        self.entropy_loss = self.policy_out * tf.log(self.policy_out + 1e-10)
+        self.V_loss = 0.5 * tf.square(self.R - tf.reshape(self.value_out,[-1]))
         
-        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy_loss)
+        self.entropy = self.policy_out * tf.log(self.policy_out + 1e-6)
+        
+        self.total_loss = tf.reduce_sum(self.policy_loss) +tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy)
         
         ##########################################################
         # updates
-                       
-        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate = LEARNING_RATE)
         
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
-               
-        #self.grad_var_pair = self.optimizer.compute_gradients(self.total_loss, self.variables)
         
         self.grad = tf.gradients(self.total_loss, self.variables)
-        #self.gradients = [tf.Variable(tf.zeros_like(var), trainable=False) for var in self.variables]
         
-        #op = self.optimizer.apply_gradients(grad_var_pair)
 
     def variable_list(self):
-        
         return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
-    
-    def apply_gradients(self, sess, gradients):
-        
-        #self.gradients = [tf.Variable(tf.zeros_like(var), trainable=False) for var in self.variables]
-        
-        grad_var_pair = [(tf.convert_to_tensor(grad), var) for i, (grad,var) in enumerate(zip(gradients, self.variables))]                
-        
-        sess.run(self.optimizer.apply_gradients(grad_var_pair))
-        
         
         
     def sync_variables(self, sess, from_scope):
@@ -213,152 +188,180 @@ class DQNet():
     def return_scope(self):
         
         return self.__scope
-
-
-#%% utility functions
-
-def process_frame(frame):
-    # input a single frame
-    # crop & downsample & average over 3 color channels 
-    return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
- 
-        
+      
 ###################################################################
 #%%
 class agent():
-    def __init__(self, id, scope_name):
+    def __init__(self, id, scope_name, logger, optimizer, global_agent = None):
         
         self.__thread_id = id
+        self.__scope_name = scope_name
+        self.__logger = logger
+        self.exit = False
 
+        self.running_reward = None
+        self.episode = 0
+        self.update_freq = 5
+        
+        self.env = gym.make("Pong-v0")
+        self.reward_sum = 0
+        self.state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
+        
+        
         with tf.variable_scope(scope_name) as scope:
             self.local_nn = DQNet(scope)
             self.local_nn.build_nn()
             self.__scope = scope
+            
+        if global_agent is not None:
+            self.global_vars = global_agent.local_nn.variable_list()
+            self.apply_gradient = optimizer.apply_gradients(zip(self.local_nn.grad, self.global_vars))
+            
+            self.sync_op = []
+            for from_var, to_var in zip(self.global_vars, self.local_nn.variables):
+                self.sync_op.append(to_var.assign(from_var.value()))
+                    
 
-        self.running_reward = None
-        self.episode = 0
-        self.update_freq = 32
-
-
-    def train(self, sess, reward_decay, global_agent):
-        # sync to global network parameters
+    def process_frame(self, frame):
+        # input a single frame
+        # crop & downsample & average over 3 color channels 
+        return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
+    
+    def reset_game(self):
+        #self.log()
+        if self.episode != 0:
+            self.__logger.log(self.__thread_id, self.reward_sum)
+        
         #self.local_nn.sync_variables(sess, global_agent.local_nn.return_scope())
-        #grad = None
-        # initialize environment
-        env = gym.make("Pong-v0")
-        
-        #while not coord.should_stop():
-        done = False
-        
-        self.local_nn.sync_variables(sess, global_agent.local_nn.return_scope())
+        sess.run(self.sync_op)
+        observation = self.env.reset()
+        self.state.fill(0)
+        self.state[:,:,-1] = self.process_frame(observation)
+        self.reward_sum = 0
 
-        observation = env.reset()
 
-        state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
-        state[:,:,-1] = process_frame(observation)
-        reward_sum = 0
+    def log(self):        
+        if True:
+            self.running_reward = self.reward_sum if self.episode == 0 else self.running_reward * 0.99 + self.reward_sum * 0.01
+            if self.episode % 10 == 0:
+                print('Thread {}: ep {}: reward: {}, mean reward: {:3f}'.format(self.__thread_id, self.episode, self.reward_sum, self.running_reward))
+            else:
+                print('\tThread {}: ep {}: reward: {}'.format(self.__thread_id, self.episode, self.reward_sum))        
+    
+    def train(self, sess, graph, coord, reward_decay):
+
+        # initialize environment      
+        self.reset_game()
 
 
         frame_sequence = np.zeros((self.update_freq, IMG_X, IMG_Y, 4), dtype = 'float32')
         action_sequence = np.zeros((self.update_freq), dtype = 'float32')
         reward_sequence = np.zeros((self.update_freq), dtype = 'float32')
         done_sequence = np.zeros((self.update_freq), dtype = 'float32')
-        while True:
-
-            # reset game environment / state
-            if done:
-                
-                self.local_nn.sync_variables(sess, global_agent.local_nn.return_scope())
-
-                observation = env.reset()
-                state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
-                state[:,:,-1] = process_frame(observation)
-
-                self.running_reward = reward_sum if self.running_reward is None else self.running_reward * 0.99 + reward_sum * 0.01
-                if self.episode % 10 == 0:
-                    print('Thread {}: ep {}: reward: {}, mean reward: {:3f}'.format(self.__thread_id, self.episode, reward_sum, self.running_reward))
-                else:
-                    print('\tThread {}: ep {}: reward: {}'.format(self.__thread_id, self.episode, reward_sum))
-                self.episode += 1
-                reward_sum = 0
+        R_sequence = np.zeros((self.update_freq + 1), dtype = 'float32')
+        #while True:
+        while not self.exit:
 
             # running game
             for t in range(self.update_freq):
                 policy_prob= sess.run(self.local_nn.policy_out, 
                                        feed_dict = {
-                                       self.local_nn.input: np.expand_dims(state[:,:,1:5], axis = 0)})
+                                       self.local_nn.input: np.expand_dims(self.state[:,:,1:5], axis = 0)})
                 # choose an action according to policy
                 action = np.random.choice(3, p=np.squeeze(policy_prob))
                 
                 # take this action for certain steps and record the reward
                 reward = 0
                 for _ in range(frame_skip):
-                    observation, reward_temp, done, info = env.step(action + 1)
+                    observation, reward_temp, done, info = self.env.step(action + 1)
                     reward += reward_temp
                     if done:
                         break
-                reward_sum += reward
+                self.reward_sum += reward
                 
                 # record game progress
-                frame_sequence[t, :, :, :] = state[:,:,1:5]
+                frame_sequence[t, :, :, :] = self.state[:,:,1:5]
                 action_sequence[t] = action
                 reward_sequence[t] = reward
                 done_sequence[t] = done
 
                 # update next game state
-                state = np.roll(state, -1, axis = 2)
-                state[:,:,-1] = process_frame(observation)
-
-                # back propagate reward and accumulate gradients
-                # check if indexings are correct
-                if done or t == (self.update_freq - 1):
-                    #print(t)
-                    # initialize R
-                    R = np.zeros((t+2), dtype = 'float32')
-                    # bootstrap from final state
-                    R[-1] = 0 if done else sess.run(self.local_nn.value_out,
-                                      feed_dict = {
-                                      self.local_nn.input: np.expand_dims(state[:,:,1:5], axis = 0)
-                                      })
-                        
-                    for i in range(t, -1, -1):
-                        if reward_sequence[i] != 0:  # specifically for pong game
-                            R[i] = reward_sequence[i]
-                        else:
-                            R[i] = reward_decay * R[i + 1]
-                        # accumulate gradient
-                    grad = sess.run(self.local_nn.grad, 
-                                    feed_dict = {
-                                    self.local_nn.input: frame_sequence[0:t+1, :, :, :],
-                                    self.local_nn.actions: action_sequence[0:t+1],
-                                    self.local_nn.R: R[0:t+1]
-                                    })
-                    # apply gradient to global network 
-                    #print('Applying gradients...')
-                    global_agent.local_nn.apply_gradients(sess, grad)
-
+                self.state = np.roll(self.state, -1, axis = 2)
+                self.state[:,:,-1] = self.process_frame(observation)
+                if done:
                     break
+                
+            R_sequence[t+1] = 0 if done else sess.run(self.local_nn.value_out,
+                                      feed_dict = {
+                                      self.local_nn.input: np.expand_dims(self.state[:,:,1:5], axis = 0)})
+            R_sequence[t+1] = np.clip(R_sequence[t+1], -1, 1)
+    
+            for idx in range(t, -1, -1):
+                if reward_sequence[idx] != 0:
+                    R_sequence[idx] = reward_sequence[idx]
+                else:
+                    R_sequence[idx] = reward_decay * R_sequence[idx+1]            
+
+            sess.run(self.apply_gradient,
+                            feed_dict = {
+                            self.local_nn.input: frame_sequence[0:t+1, :, :, :],
+                            self.local_nn.actions: action_sequence[0:t+1],
+                            self.local_nn.R: R_sequence[0:t+1]})
+            if done:
+                self.reset_game()
+                self.episode += 1
                     
+#%%
+class Logger(object):
+    def __init__(self):
+        # RawValue because we don't need it to create a Lock:
+        self.global_episode = 0
+        self.running_reward = 0
+        self.lock = threading.Lock()
+
+    def log(self, thread_id, reward_sum):
+        with self.lock:
+            self.running_reward = reward_sum if self.global_episode == 0 else self.running_reward * 0.99 + reward_sum * 0.01
+            self.global_episode += 1
+            if self.global_episode % 10 == 0:
+                print('Ep {}: thread {}: reward: {}, mean reward: {:3f}'.format(self.global_episode, thread_id, reward_sum, self.running_reward))
+            else:
+                print('\tEp {}: thread {}: reward: {}'.format(self.global_episode, thread_id, reward_sum)) 
+                
 
 
 #%%
 # initialize tensorflow
 tf.reset_default_graph()
-# initialize global network
-global_agent = agent(-1, 'global')
-# initialize local networks
-THREAD_NUM = 4
-local_agent = []
-for thread_id in range(THREAD_NUM):
-    local_scope = 'local'+str(thread_id)
-    local_agent.append(agent(thread_id, local_scope))
-# initialize tensorflow 
-init_op = tf.global_variables_initializer()
-sess = tf.Session()
-#coord = tf.train.Coordinator()
+graph = tf.Graph()
+sess = tf.Session(graph=graph)
+coord = tf.train.Coordinator()
+optimizer = tf.train.RMSPropOptimizer(
+                learning_rate=0.00025,
+                decay=0.99,
+                momentum=0,
+                epsilon=0.1,
+                use_locking = True)
+logger = Logger()
+
+with graph.as_default():
+    # initialize global network
+    global_agent = agent(-1, 'global', logger, optimizer)
+    # initialize local networks
+    THREAD_NUM = 4
+    local_agent = []
+    for thread_id in range(THREAD_NUM):
+        local_scope = 'local'+str(thread_id)
+        local_agent.append(agent(thread_id, local_scope, logger, optimizer, global_agent))
+
+    # initialize tensorflow 
+    init_op = tf.global_variables_initializer()
+    saver = tf.train.Saver()
+
+
 sess.run(init_op)
 
-saver = tf.train.Saver()
+
 
 try:
     ckpt = tf.train.get_checkpoint_state(save_path)
@@ -367,7 +370,6 @@ try:
     f = open(save_path + 'reward_log.cptk','rb')
     reward_log = pickle.load(f)
     f.close()
-    random_action_prob = 0.1
     print("Session restored...")
 except:
     # sync variables for all local network
@@ -375,11 +377,20 @@ except:
     print("Nothing to restore...")
 
 
-# starting each local networks in different threads
-local_agent[0].train(sess, future_reward_discount, global_agent)
+training_thread = []
+for id, agent in enumerate(local_agent):
+    t = threading.Thread(target = agent.train, args = (sess, graph, coord, future_reward_discount))
+    t.start()
+    time.sleep(1)
+    training_thread.append(t)
+#%%
 
-#coord.join(threads)
-# end ...
+for (agent, agent_thread) in zip(local_agent, training_thread):
+    agent.exit = True
+    time.sleep(0.5)
+    agent_thread.join(1)
+
+
 
 
 
