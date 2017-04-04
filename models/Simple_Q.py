@@ -16,7 +16,7 @@ DEBUG = True
 
 RENDER = False  # if displaying game graphics real time
 
-LEARNING_RATE = 0.00025 
+LEARNING_RATE = 0.0001 
 
 IMG_X, IMG_Y = 80, 80
 
@@ -25,21 +25,21 @@ action_space = 3  # possible action = 1, 2, 3; still, up, down
 if DEBUG:
     LEARNING_RATE = 0.001
     max_episode = 21
-    max_frame = 10000
+    max_frame = 5000
     batch_size = 32
     running_reward = None
     max_reward = None
     future_reward_discount = 0.99
     random_action_prob = 0.9
     rand_prob_step = (0.9 - 0.1)/60000
-    buffer_size = 60000
+    buffer_size = 10000
     frame_skip = 2
     sync_freq = 2000
     update_freq = 4
-    save_freq = 200
+    save_freq = 100
 else:
     max_episode = 21
-    max_frame = 10000
+    max_frame = 100000
     batch_size = 32
     running_reward = None
     max_reward = None
@@ -48,7 +48,7 @@ else:
     rand_prob_step = (0.9 - 0.1)/1000000
     buffer_size = 500000
     frame_skip = 2
-    sync_freq = 2000
+    sync_freq = 5000
     update_freq = 4
     save_freq = 200
 
@@ -57,11 +57,10 @@ save_path = "./"
 
 #%% Deep Q-Network Structure
 class DQNet():
-    def __init__(self,scope, input_size = (80, 80, 1), action_space = 3):
+    def __init__(self,input_size = (80, 80, 1), action_space = 3):
 
         self.input_x, self.input_y, self.input_frame= input_size
         self.action_space = action_space
-        self.__scope = scope
 
     def build_nn(self):
         
@@ -99,7 +98,7 @@ class DQNet():
         self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)
 
     def variable_list(self):
-        return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
+        return [self.W1, self.b1, self.W2, self.b2]
 
 #%% utility functions
 
@@ -135,12 +134,50 @@ def process_frame(frame):
     return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
  
 def copy_variables(from_nn, to_nn, sess):   
-    
-    for from_var, to_var in zip(from_nn, to_nn):
-        op = to_var.assign(from_var.value())
+    for i in range(len(from_nn)):
+        op = to_nn[i].assign(from_nn[i].value())
         sess.run(op)
 
 
+
+  
+#%%
+###################################################################
+# Initialize environment
+
+env = gym.make("Pong-v0")
+
+
+tf.reset_default_graph()
+Atari_AI_primary = DQNet()
+Atari_AI_primary.build_nn()
+
+Atari_AI_target = DQNet()
+Atari_AI_target.build_nn()
+
+init_op = tf.global_variables_initializer()
+reward_log = []
+
+sess = tf.Session()
+sess.run(init_op)
+
+# Initialize saver
+saver = tf.train.Saver()
+
+try:
+    ckpt = tf.train.get_checkpoint_state(save_path)
+    load_path = ckpt.model_checkpoint_path
+    saver.restore(sess, load_path)
+    f = open(save_path + 'reward_log.cptk','rb')
+    reward_log = pickle.load(f)
+    f.close()
+    RESTORED = True
+    random_action_prob = 0.1
+    print("Session restored...")
+except:
+    RESTORED = True
+    print("Nothing to restore...")
+    
 #%%
 ###################################################################
 # pre-training, fill the replay memory buffer with 10,000 random examples
@@ -159,8 +196,17 @@ while True:
     state[:,:,-1] = process_frame(observation)
       
     for t in range(buffer_size):
-
-        action = random.randint(0, 2)
+        if RESTORED:
+            if np.random.random_sample() > random_action_prob:
+                # use model to predict action
+                #state_input[:,:,0] = state[:,:,-2] - state[:,:,-3]
+                action = sess.run(Atari_AI_primary.predict,
+                                  feed_dict = {Atari_AI_primary.input: np.reshape(state[:,:,-1] - state[:,:,-2], [1, 80, 80, 1])})[0]
+            else: 
+                # random action
+                action = random.randint(0, 2) # random sample action from 1 to 3
+        else:
+            action = random.randint(0, 2)
         
         # run the game with same action for a few frames
         for _ in range(frame_skip):
@@ -182,48 +228,9 @@ while True:
     
     if buffer_counter > buffer_size:
         break
-env.close()
-  
+env.close()    
+    
 #%%
-###################################################################
-# Initialize environment
-
-env = gym.make("Pong-v0")
-
-tf.reset_default_graph()
-with tf.variable_scope("Primary") as scope:
-    Atari_AI_primary = DQNet(scope)
-    Atari_AI_primary.build_nn()
-with tf.variable_scope("Target") as scope:
-    Atari_AI_target = DQNet(scope)
-    Atari_AI_target.build_nn()
-
-init_op = tf.global_variables_initializer()
-reward_log = []
-
-sess = tf.Session()
-sess.run(init_op)
-
-# Initialize saver
-saver = tf.train.Saver()
-
-try:
-    ckpt = tf.train.get_checkpoint_state(save_path)
-    load_path = ckpt.model_checkpoint_path
-    saver.restore(sess, load_path)
-    f = open(save_path + 'reward_log.cptk','rb')
-    reward_log = pickle.load(f)
-    f.close()
-    
-    random_action_prob = 0.1
-    
-    print("Session restored...")
-except:
-    primary_variables = Atari_AI_primary.variable_list()
-    target_variables = Atari_AI_target.variable_list()
-    copy_variables(primary_variables, target_variables, sess)
-    print("Nothing to restore...")
-
 
 # start training
 i_episode = 0
@@ -296,8 +303,7 @@ while True:
         # save the model after every 200 updates       
         if done:
             running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
-            
-            
+
             if DEBUG:
                 if i_episode % 10 == 0:
                     print('ep {}: updates {}: reward: {}, mean reward: {:3f}'.format(i_episode, updates, reward_sum, running_reward))
@@ -310,81 +316,10 @@ while True:
                 
             if i_episode % save_freq == 0:
                 max_reward = running_reward if max_reward is None else max(max_reward, running_reward)
-                if running_reward == max_reward:               
+                if max_reward == running_reward:
                     saver.save(sess, save_path+'model-'+str(i_episode)+'.cptk')
                     f = open(save_path + 'reward_log.cptk','wb')
                     pickle.dump(reward_log, f)
                     f.close()
                 
             break
-        
-        
-#%% testing 
-###################################################################
-# Initialize environment
-
-env = gym.make("Pong-v0")
-
-tf.reset_default_graph()
-Atari_AI_primary = DQNet()
-Atari_AI_primary.build_nn()
-
-Atari_AI_target = DQNet()
-Atari_AI_target.build_nn()
-
-init_op = tf.global_variables_initializer()
-
-sess = tf.Session()
-sess.run(init_op)
-
-# Initialize saver
-saver = tf.train.Saver()
-
-try:
-    ckpt = tf.train.get_checkpoint_state(save_path)
-    load_path = ckpt.model_checkpoint_path
-    saver.restore(sess, load_path)
-    f = open(save_path + 'reward_log.cptk','rb')
-    reward_log = pickle.load(f)
-    f.close()
-    
-    
-    print("Session restored...")
-except:
-    primary_variables = Atari_AI_primary.variable_list()
-    target_variables = Atari_AI_target.variable_list()
-    copy_variables(primary_variables, target_variables, sess)
-    print("Nothing to restore...")
-
-
-# start training
-i_episode = 0
-
-while True:
-    
-    i_episode += 1
-    
-    observation = env.reset()
-    
-    state = np.zeros((IMG_X, IMG_Y, 5), dtype = 'float32')
-    state[:,:,-1] = process_frame(observation)
-    reward_sum = 0
-    
-    for t in range(max_frame):
-
-        # select an action based on the action-value function Q
-        action = sess.run(Atari_AI_primary.predict,
-                              feed_dict = {Atari_AI_primary.input: np.reshape(state[:,:,-1] - state[:,:,-2], [1, 80, 80, 1])})[0]
-            
-        # excute the action for a few steps
-        for _ in range(frame_skip):
-            observation, reward, done, info = env.step(action+1)
-            env.render()
-            reward_sum += reward
-            if done:
-                break
-        
-        # save the model after every 200 updates       
-        if done:
-            print('\tep {}: reward: {}'.format(i_episode, reward_sum))                
-            break        

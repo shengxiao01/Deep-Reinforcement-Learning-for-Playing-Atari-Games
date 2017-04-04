@@ -318,16 +318,36 @@ class Logger(object):
         self.global_episode = 0
         self.running_reward = 0
         self.lock = threading.Lock()
+        
+        self.save_freq = 100
+        self.save_path = './'
+        self.__saver = None
+        self.__sess = None   
+        self.reward_log = []
 
     def log(self, thread_id, reward_sum):
         with self.lock:
             self.running_reward = reward_sum if self.global_episode == 0 else self.running_reward * 0.99 + reward_sum * 0.01
             self.global_episode += 1
             if self.global_episode % 10 == 0:
+                self.reward_log.append(self.running_reward)
                 print('Ep {}: thread {}: reward: {}, mean reward: {:3f}'.format(self.global_episode, thread_id, reward_sum, self.running_reward))
             else:
                 print('\tEp {}: thread {}: reward: {}'.format(self.global_episode, thread_id, reward_sum)) 
                 
+            if self.global_episode % 2000 == 0 and self.__saver is not None:
+                self.save()
+                
+    def save(self):
+        
+        self.__saver.save(self.__sess, self.save_path+'model-'+str(self.global_episode)+'.cptk')
+        f = open(self.save_path + 'reward_log.cptk','wb')
+        pickle.dump(self.reward_log, f)
+        f.close()     
+        
+    def add_saver(self, sess, saver):
+        self.__saver = saver
+        self.__sess = sess 
 
 
 #%%
@@ -336,15 +356,19 @@ tf.reset_default_graph()
 graph = tf.Graph()
 sess = tf.Session(graph=graph)
 coord = tf.train.Coordinator()
+logger = Logger()
 optimizer = tf.train.RMSPropOptimizer(
                 learning_rate=0.00025,
                 decay=0.99,
                 momentum=0,
                 epsilon=0.1,
                 use_locking = True)
-logger = Logger()
+
 
 with graph.as_default():
+    # saver
+    
+    
     # initialize global network
     global_agent = agent(-1, 'global', logger, optimizer)
     # initialize local networks
@@ -357,10 +381,10 @@ with graph.as_default():
     # initialize tensorflow 
     init_op = tf.global_variables_initializer()
     saver = tf.train.Saver()
-
-
+    
+    
 sess.run(init_op)
-
+logger.add_saver(sess, saver)
 
 
 try:
