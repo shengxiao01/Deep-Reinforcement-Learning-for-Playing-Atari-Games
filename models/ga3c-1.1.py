@@ -128,7 +128,7 @@ class A3CNet():
         
         self.entropy_loss = self.policy_out * tf.log(self.policy_out + 1e-10)
         
-        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0 * tf.reduce_sum(self.entropy_loss)
+        self.total_loss = tf.reduce_sum(self.policy_loss) + 0.5 * tf.reduce_sum(self.V_loss) + 0.01 * tf.reduce_sum(self.entropy_loss)
 
         ##########################################################
         # updates
@@ -166,14 +166,6 @@ class A3CNet():
         
         sess.run(self.optimizer.apply_gradients(grad_var_pair))
         
-        
-    def sync_variables(self, sess, from_scope):
-        
-        from_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=from_scope.name)
-        
-        for from_var, to_var in zip(from_variables, self.variables):
-            op = to_var.assign(from_var.value())
-            sess.run(op)
             
     def return_scope(self):
         

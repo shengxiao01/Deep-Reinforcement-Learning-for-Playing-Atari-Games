@@ -146,18 +146,20 @@ class DQNet():
         
         self.predict = tf.argmax(self.output, 1)
         
-        self.targetQ = tf.placeholder(shape=[None],dtype=tf.float32)
+        self.maxQ = tf.reduce_max(self.output, axis = 1)
         
-        self.actions = tf.placeholder(shape=[None],dtype=tf.int32)
+        #self.targetQ = tf.placeholder(shape=[None],dtype=tf.float32)
         
-        self.actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
+        #self.actions = tf.placeholder(shape=[None],dtype=tf.int32)
         
-        self.Q = tf.reduce_sum((self.output * self.actions_onehot), 
-                               reduction_indices=1)
+        #self.actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
         
-        self.loss = tf.reduce_mean(tf.square(self.targetQ - self.Q))
+        #self.Q = tf.reduce_sum((self.output * self.actions_onehot), 
+        #                       reduction_indices=1)
+        
+        #self.loss = tf.reduce_mean(tf.square(self.targetQ - self.Q))
 
-        self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)
+        #self.update = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(self.loss)
         
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
 
@@ -172,12 +174,6 @@ class DQNet():
         for from_var, to_var in zip(from_variables, self.variables):
             op = to_var.assign(from_var.value())
             sess.run(op)
-
-    def train(self, sess, state, action, targetQ):
-        sess.run(self.update, feed_dict = {
-                 self.input: state,
-                 self.actions: action,
-                 self.targetQ: targetQ})
 
     def estimateQ(self, sess, state):
         Q_out = sess.run(self.output, 
@@ -302,7 +298,19 @@ class Agent():
         # setting up utilities
         self.memory_buffer = replayMemory(self.buffer_size)
         
+        self.init_nn()
+
+            
+        # initialize variables    
+        self.sess = tf.Session()
+        self.saver = tf.train.Saver()
+        self.sess.run(tf.global_variables_initializer())
         
+        # restore variables
+        self.logger = Logger(self.sess, self.saver)
+        self.random_action_prob = 0.1 if self.logger.restore() else 0.9
+        
+    def init_nn(self):
         # building networks
         with tf.variable_scope('primary') as scope:
             self.primary_nn = DQNet(scope, self.action_space)
@@ -313,16 +321,24 @@ class Agent():
             self.target_nn = DQNet(scope, self.action_space)
             self.target_nn.build_nn()
             self.__target_scope = scope 
-            
-        # initialize variables    
-        self.sess = tf.Session()
-        self.saver = tf.train.Saver()
-        self.sess.run(tf.global_variables_initializer())
+        # dueling structure    
+        self.end_game = tf.placeholder(shape=[None],dtype=tf.float32)
+        self.current_reward = tf.placeholder(shape=[None],dtype=tf.float32)
+        self.actions = tf.placeholder(shape=[None],dtype=tf.int32)
         
-        # restore variables
-        self.logger = Logger(self.sess, self.saver)
-        self.random_action_prob = 0.1 if self.logger.restore() else 0.9
+        next_Q = self.target_nn.maxQ
+        
+        targetQ = self.current_reward + self.reward_discount * tf.multiply(1 - self.end_game, next_Q)
                 
+        actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
+        
+        Q = tf.reduce_sum((self.primary_nn.output * actions_onehot), 
+                               reduction_indices=1)
+        
+        loss = tf.reduce_mean(tf.square(targetQ - Q))
+
+        self.train = tf.train.AdamOptimizer(learning_rate = LEARNING_RATE).minimize(loss)    
+                       
     def init_memory(self):
         # reset the game environment, take a initial screen shot
         buffer_counter = 0
@@ -410,12 +426,11 @@ class Agent():
         # randomly sample minibatch from memory
         state_current, state_future, actions, current_rewards, end_game = self.memory_buffer.makeBatch(self.batch_size)
         
-        next_Q = self.target_nn.estimateQ(self.sess, state_future)
-        
-        targetQ = current_rewards + self.reward_discount * (1 - end_game) * np.amax(next_Q, axis = 1)
-        
-        # update the target-value function Q
-        self.primary_nn.train(self.sess, state_current, actions, targetQ)
+        self.sess.run(self.train, feed_dict={self.target_nn.input: state_future,
+                                 self.primary_nn.input: state_current,
+                                 self.actions: actions,
+                                 self.current_reward: current_rewards,
+                                 self.end_game: end_game})
         
         # # every C step reset Q' = Q
         self.updates += 1
