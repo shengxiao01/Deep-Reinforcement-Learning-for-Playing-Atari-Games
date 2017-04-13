@@ -94,7 +94,6 @@ class Agent():
             future_rewards[t] = running_add
             
         self.nn.train(self.sess, states, actions, future_rewards)
-        #print(self.nn.predict_policy(self.sess, states))
         
             
     def test(self):
