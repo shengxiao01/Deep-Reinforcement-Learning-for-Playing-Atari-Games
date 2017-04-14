@@ -41,6 +41,8 @@ Params = {
         
         'SAVE_PATH': './log/',
         
-        'IMG_X': 80,
+        'IMG_X': 105,
         
-        'IMG_Y': 80}
+        'IMG_Y': 80,
+        
+        'IMG_Z': 4}

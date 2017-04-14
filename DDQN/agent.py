@@ -159,7 +159,8 @@ class Agent():
                     break
                 
     def process_frame(self, frame):
-        return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
+        #return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
+        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32') / 128 - 1
     
     
     def reset_game(self):

@@ -38,10 +38,12 @@ Params = {
         
         'SAVE_PATH': './log/',
         
-        'IMG_X': 80,
+        'IMG_X': 105,
         
         'IMG_Y': 80,
         
         'IMG_Z': 4,
         
-        'ENTROPY_PENALTY': 0.01}
+        'ENTROPY_PENALTY': 0.01,
+        
+        'MIN_POLICY': 0.02}

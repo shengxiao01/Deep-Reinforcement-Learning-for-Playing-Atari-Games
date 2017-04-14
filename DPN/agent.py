@@ -32,6 +32,7 @@ class Agent():
         
         # restore variables
         self.logger = Logger(self.sess, self.saver)
+        self.logger.restore()
            
 
     def run(self):
@@ -94,6 +95,7 @@ class Agent():
             future_rewards[t] = running_add
             
         self.nn.train(self.sess, states, actions, future_rewards)
+        print(self.nn.predict_policy(self.sess, states[20:22]))
         
             
     def test(self):
@@ -118,7 +120,9 @@ class Agent():
                     break
                 
     def process_frame(self, frame):
-        return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
+        #frame_gray = frame * np.array(([0.21, 0.72, 0.07])) / 256
+        # output shape 105X80
+        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32') / 128 - 1
     
     
     def reset_game(self):
