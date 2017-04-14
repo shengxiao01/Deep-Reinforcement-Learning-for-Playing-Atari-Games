@@ -1,6 +1,0 @@
-model_checkpoint_path: "model-2600.cptk"
-all_model_checkpoint_paths: "model-1800.cptk"
-all_model_checkpoint_paths: "model-2000.cptk"
-all_model_checkpoint_paths: "model-2200.cptk"
-all_model_checkpoint_paths: "model-2400.cptk"
-all_model_checkpoint_paths: "model-2600.cptk"
