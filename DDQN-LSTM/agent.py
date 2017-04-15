@@ -79,7 +79,7 @@ class Agent():
                 if done:
                     self.memory_buffer.add(state_sequence, action_sequence, reward_sequence, done_sequence)
                     buffer_counter += 1
-                    print("Episode finished after {} timesteps".format(buffer_counter+1))
+                    print("Episode {} finished".format(buffer_counter+1))
                     break
         
             if buffer_counter > self.buffer_size:
@@ -93,7 +93,7 @@ class Agent():
         while True:
             reward_sum = 0
             observation = self.env.reset()
-            rnn_state = (np.zeros([1,512]),np.zeros([1,512]))
+            rnn_state = (np.zeros([1,self.rnn_h_units]),np.zeros([1,self.rnn_h_units]))
             
             state_sequence = []
             action_sequence = []

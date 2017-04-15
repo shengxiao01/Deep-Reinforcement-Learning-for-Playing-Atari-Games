@@ -21,10 +21,10 @@ class DDQNet():
     def dueling_nn(self):
         
         with tf.variable_scope(self.primary_scope) as scope:
-            self.primary_in, self.primary_out, self.primary_rnn_in, self.primary_rnn_out, self.primary_bz = self.build_nn()
+            self.primary_dict = self.build_nn()
             
         with tf.variable_scope(self.target_scope) as scope:
-            self.target_in, self.target_out, self.target_rnn_in, self.target_rnn_out, self.target_bz = self.build_nn()
+            self.target_dict = self.build_nn()
             
 
         self.end_game = tf.placeholder(shape=[None],dtype=tf.float32)
@@ -32,7 +32,7 @@ class DDQNet():
         self.actions = tf.placeholder(shape=[None],dtype=tf.int32)
         self.trainLength = tf.placeholder(tf.int32)
         
-        next_Q = tf.reduce_max(self.target_out, axis = 1)
+        next_Q = tf.reduce_max(self.target_dict['Q_out'], axis = 1)
         
         targetQ = self.current_reward + self.reward_discount * tf.multiply(1 - self.end_game, next_Q)
         
@@ -40,11 +40,11 @@ class DDQNet():
                 
         actions_onehot = tf.one_hot(self.actions, self.action_space, dtype=tf.float32)
         
-        Q = tf.reduce_sum((self.primary_out * actions_onehot), reduction_indices=1)
+        Q = tf.reduce_sum((self.primary_dict['Q_out'] * actions_onehot), reduction_indices=1)
         
         
-        maskA = tf.zeros([self.primary_bz, self.trainLength//2])
-        maskB = tf.ones([self.primary_bz, self.trainLength//2])
+        maskA = tf.zeros([self.primary_dict['batch_size_in'], self.trainLength//2])
+        maskB = tf.ones([self.primary_dict['batch_size_in'], self.trainLength//2])
         mask = tf.concat([maskA,maskB],1)
         mask = tf.reshape(mask,[-1])
         
@@ -53,7 +53,7 @@ class DDQNet():
         # training
         self.update = tf.train.AdamOptimizer(learning_rate = self.learning_rate).minimize(loss)
         # predict action according to the target network
-        self.predict = tf.argmax(self.primary_out, axis = 1)
+        self.predict = tf.argmax(self.primary_dict['Q_out'], axis = 1)
         
         # synchronize two networks
         from_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.primary_scope)
@@ -122,11 +122,13 @@ class DDQNet():
         rnn_cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_units = self.rnn_h_units)
         
         rnn_state_in = rnn_cell.zero_state(batch_size, tf.float32)
+        rnn_state_in_1 = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
+        rnn_state_in_2 = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
         
         rnn, rnn_state_out = tf.nn.dynamic_rnn(inputs=rnn_in, 
                                                          cell=rnn_cell, 
                                                          dtype=tf.float32, 
-                                                         initial_state=rnn_state_in)
+                                                         initial_state=[rnn_state_in_1, rnn_state_in_2])
         rnn_out = tf.reshape(rnn, [-1, self.rnn_h_units])
         
         ##############################################################
@@ -142,38 +144,41 @@ class DDQNet():
         #Then combine them together to get our final Q-values.
         Q_out = value_out + advantage_out - tf.reduce_mean(advantage_out,reduction_indices=1,keep_dims=True)
         
-        return state_in, Q_out, rnn_state_in, rnn_state_out, batch_size
+        model_dict = {'state_in': state_in, 'rnn_in':rnn_state_in, 'Q_out':Q_out,
+                      'rnn_out':rnn_state_out, 'batch_size_in': batch_size, 'filters': conv3_W, 'r1':rnn_state_in_1, 'r2':rnn_state_in_2}
+        return model_dict
 
 
     def sync_variables(self, sess):
 
         # adding scope to network        
         sess.run(self.sync_op)
-            
+                  
     def train(self, sess, state_current, state_future, action, reward, end_game, rnn_state_in, batch_size, rnn_seq_len):
         
-        sess.run(self.update, feed_dict={self.target_in: state_future,
-                                         self.primary_in: state_current,
+        sess.run(self.update, feed_dict={self.target_dict['state_in']: state_future,
+                                         self.primary_dict['state_in']: state_current,
                                          self.actions: action,
                                          self.current_reward: reward,
                                          self.end_game: end_game,
-                                         self.primary_rnn_in: rnn_state_in,
-                                         self.primary_bz: batch_size,
-                                         self.target_bz: batch_size,
+                                         self.primary_dict['rnn_in']: rnn_state_in,
+                                         self.target_dict['rnn_in']: rnn_state_in,
+                                         self.primary_dict['batch_size_in']: batch_size,
+                                         self.target_dict['batch_size_in']: batch_size,
                                          self.trainLength: rnn_seq_len})
 
     def predict_act(self, sess, state, rnn_state_in, batch_size):
         # 1X80X80X4 single image
-        action, rnn_state_out = sess.run([self.predict, self.primary_rnn_out],
-                          feed_dict = {self.primary_in: state,
-                                       self.primary_rnn_in: rnn_state_in,
-                                       self.primary_bz: batch_size})
+        action, rnn_state_out = sess.run([self.predict, self.primary_dict['rnn_out']],
+                          feed_dict = {self.primary_dict['state_in']: state,
+                                         self.primary_dict['rnn_in']: rnn_state_in,
+                                       self.primary_dict['batch_size_in']: batch_size})
         return action, rnn_state_out
     
     def return_rnn_state(self, sess, state, rnn_state_in, batch_size):
         # 1X80X80X4 single image
-        rnn_state_out = sess.run(self.primary_rnn_out,
-                          feed_dict = {self.primary_in: state,
-                                       self.primary_rnn_in: rnn_state_in,
-                                       self.primary_bz: batch_size})
+        rnn_state_out = sess.run(self.primary_dict['rnn_out'],
+                          feed_dict = {self.primary_dict['state_in']: state,
+                                       self.primary_dict['rnn_in']: rnn_state_in,
+                                       self.primary_dict['batch_size_in']: batch_size})
         return rnn_state_out
