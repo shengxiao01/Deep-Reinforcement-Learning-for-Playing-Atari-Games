@@ -34,10 +34,11 @@ class Agent():
         
         # setting up utilities
         self.memory_buffer = replayMemory(self.IMG_X, self.IMG_Y, self.buffer_size)
-        
+        tf.reset_default_graph()
         self.nn = DDQNet(self.action_space)
 
-        # initialize variables    
+        # initialize variables   
+        
         self.sess = tf.Session()
         self.saver = tf.train.Saver()
         self.sess.run(tf.global_variables_initializer())
@@ -56,8 +57,8 @@ class Agent():
             # the state of current game play, 0:2 is 3 previous frame,
             # 3 is the current frame, 4 is the frame after action
             state = np.zeros((1, self.IMG_X, self.IMG_Y, 1), dtype = 'float32')
-            rnn_state = (np.zeros([1,512]),np.zeros([1,512]))
-            state[0, :, :, 0] = self.process_frame(observation)
+            rnn_state = (np.zeros([1, self.rnn_h_units]),np.zeros([1, self.rnn_h_units]))
+            state = self.process_frame(observation)
             
             state_sequence = []
             action_sequence = []
@@ -66,16 +67,16 @@ class Agent():
             
             while True:
 
-                observation, action, reward, done, rnn_state = self.take_action(state, rnn_state, 1)
+                observation, action, reward, done, rnn_state = self.take_action(np.expand_dims(state, axis = 0), rnn_state, 1)
                 
                 # effective area [34:194, 0:168] with 2*2 downsampling -> 160/2 * 130/2 matrix
                 
-                state_sequence.append(state[0, :, :, :])
+                state_sequence.append(state)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
                 done_sequence.append(done)
                 
-                state[0, :, :, 0] = self.process_frame(observation)
+                state = self.process_frame(observation)
                 if done:
                     self.memory_buffer.add(state_sequence, action_sequence, reward_sequence, done_sequence)
                     buffer_counter += 1
@@ -93,29 +94,29 @@ class Agent():
         while True:
             reward_sum = 0
             observation = self.env.reset()
-            rnn_state = (np.zeros([1,self.rnn_h_units]),np.zeros([1,self.rnn_h_units]))
+            rnn_state = (np.zeros([1, self.rnn_h_units]),np.zeros([1, self.rnn_h_units]))
             
             state_sequence = []
             action_sequence = []
             reward_sequence = []
             done_sequence = []
             
-            state = np.zeros((1, self.IMG_X, self.IMG_Y, 1), dtype = 'float32')
-            state[0, :,:,0] = self.process_frame(observation)
+
+            state = self.process_frame(observation)
             
             while True:
                 # select an action based on the action-value function Q
-                observation, action, reward, done, rnn_state = self.take_action(state, rnn_state, 1)
+                observation, action, reward, done, rnn_state = self.take_action(np.expand_dims(state, axis = 0), rnn_state, 1)
                 reward_sum += reward
 
                 # add current state to the memory buffer
-                state_sequence.append(state[0, :, :, :])
+                state_sequence.append(state)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
                 done_sequence.append(done)
                 
                 # update the new state and reward and memory buffer
-                state[0, :, :, 0] = self.process_frame(observation)                 
+                state = self.process_frame(observation)                 
                 steps += 1
                 # update the network after few steps
                 if steps % self.update_freq == 0:
@@ -127,6 +128,7 @@ class Agent():
                             
                 # save the model after every 200 updates       
                 if done:
+                    
                     self.memory_buffer.add(state_sequence, action_sequence, reward_sequence, done_sequence)
                     self.logger.log(reward_sum)                    
                     break
@@ -164,6 +166,7 @@ class Agent():
         self.updates += 1
         if self.updates % self.sync_freq == 0:
             self.nn.sync_variables(self.sess)
+        
             
     def test(self):
         while True:
@@ -185,7 +188,7 @@ class Agent():
                 
     def process_frame(self, frame):
         #return np.mean(frame[34: 194 : 2, 0: 160 : 2, :], axis = 2, dtype = 'float32') > 100
-        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32') / 128 - 1
+        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32', keepdims = True) / 128 - 1
     
     
     def reset_game(self):

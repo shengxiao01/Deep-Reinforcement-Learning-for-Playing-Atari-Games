@@ -110,8 +110,7 @@ class DDQNet():
         ff1_W = tf.Variable(tf.truncated_normal([3136, self.rnn_h_units], stddev = 0.01))
         ff1_b = tf.Variable(tf.truncated_normal([1, self.rnn_h_units], stddev = 0.01))
         # output batch_size * 512
-        ff1_out = tf.matmul(ff1_input, ff1_W) + ff1_b
-        ff1_out = tf.nn.relu(ff1_out)
+        ff1_out = tf.nn.relu(tf.matmul(ff1_input, ff1_W) + ff1_b)
         
         ############################################################
         # recurrent layer
@@ -121,14 +120,14 @@ class DDQNet():
         
         rnn_cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_units = self.rnn_h_units)
         
-        rnn_state_in = rnn_cell.zero_state(batch_size, tf.float32)
-        rnn_state_in_1 = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
-        rnn_state_in_2 = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
+        rnn_c_in = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
+        rnn_h_in = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
+        rnn_state_in = tf.contrib.rnn.LSTMStateTuple(rnn_c_in, rnn_h_in)
         
         rnn, rnn_state_out = tf.nn.dynamic_rnn(inputs=rnn_in, 
                                                          cell=rnn_cell, 
                                                          dtype=tf.float32, 
-                                                         initial_state=[rnn_state_in_1, rnn_state_in_2])
+                                                         initial_state=rnn_state_in)
         rnn_out = tf.reshape(rnn, [-1, self.rnn_h_units])
         
         ##############################################################
@@ -144,8 +143,8 @@ class DDQNet():
         #Then combine them together to get our final Q-values.
         Q_out = value_out + advantage_out - tf.reduce_mean(advantage_out,reduction_indices=1,keep_dims=True)
         
-        model_dict = {'state_in': state_in, 'rnn_in':rnn_state_in, 'Q_out':Q_out,
-                      'rnn_out':rnn_state_out, 'batch_size_in': batch_size, 'filters': conv3_W, 'r1':rnn_state_in_1, 'r2':rnn_state_in_2}
+        model_dict = {'state_in': state_in, 'rnn_in': (rnn_c_in, rnn_h_in), 'Q_out':Q_out,
+                      'rnn_out':rnn_state_out, 'batch_size_in': batch_size}
         return model_dict
 
 
@@ -161,17 +160,21 @@ class DDQNet():
                                          self.actions: action,
                                          self.current_reward: reward,
                                          self.end_game: end_game,
-                                         self.primary_dict['rnn_in']: rnn_state_in,
-                                         self.target_dict['rnn_in']: rnn_state_in,
+                                         self.primary_dict['rnn_in'][0]: rnn_state_in[0],
+                                         self.primary_dict['rnn_in'][1]: rnn_state_in[1],
+                                         self.target_dict['rnn_in'][0]: rnn_state_in[0],
+                                         self.target_dict['rnn_in'][1]: rnn_state_in[1],
                                          self.primary_dict['batch_size_in']: batch_size,
                                          self.target_dict['batch_size_in']: batch_size,
                                          self.trainLength: rnn_seq_len})
+
 
     def predict_act(self, sess, state, rnn_state_in, batch_size):
         # 1X80X80X4 single image
         action, rnn_state_out = sess.run([self.predict, self.primary_dict['rnn_out']],
                           feed_dict = {self.primary_dict['state_in']: state,
-                                         self.primary_dict['rnn_in']: rnn_state_in,
+                                       self.primary_dict['rnn_in'][0]: rnn_state_in[0],
+                                       self.primary_dict['rnn_in'][1]: rnn_state_in[1],
                                        self.primary_dict['batch_size_in']: batch_size})
         return action, rnn_state_out
     
@@ -179,6 +182,7 @@ class DDQNet():
         # 1X80X80X4 single image
         rnn_state_out = sess.run(self.primary_dict['rnn_out'],
                           feed_dict = {self.primary_dict['state_in']: state,
-                                       self.primary_dict['rnn_in']: rnn_state_in,
+                                       self.primary_dict['rnn_in'][0]: rnn_state_in[0],
+                                       self.primary_dict['rnn_in'][1]: rnn_state_in[1],
                                        self.primary_dict['batch_size_in']: batch_size})
         return rnn_state_out

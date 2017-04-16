@@ -37,7 +37,7 @@ Params = {
         
         'SAVE_FREQ': 200,
         
-        'MEMORY_BUFFER_SIZE': 200,
+        'MEMORY_BUFFER_SIZE': 100,
         
         'SAVE_PATH': './log/',
         
