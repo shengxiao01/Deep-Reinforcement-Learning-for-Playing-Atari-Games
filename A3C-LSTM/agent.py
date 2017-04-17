@@ -104,6 +104,7 @@ class Agent():
     def update_nn(self, states, actions, rewards, rnn_state_init):
         
         self.local_nn.update_global(states, actions, rewards, rnn_state_init)
+        self.local_nn.sync_variables()
 
     def test(self):
         pass
@@ -117,9 +118,8 @@ class Agent():
     def reset_game(self):
         #self.log()
         self.__logger.log(self.__thread_id, self.reward_sum)
+
         
-        #self.local_nn.sync_variables(sess, global_agent.local_nn.return_scope())
-        self.local_nn.sync_variables()
         observation = self.env.reset()
         self.state.fill(0)
         self.rnn_state[0].fill(0)
