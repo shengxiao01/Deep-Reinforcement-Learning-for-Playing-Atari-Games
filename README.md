@@ -27,3 +27,4 @@ To train other games or change model parameter, edit the corresponding params.py
 * [Human-level control through deep reinforcement learning](http://www.nature.com/nature/journal/v518/n7540/full/nature14236.html)
 * [Dueling Network Architectures for Deep Reinforcement Learning](https://arxiv.org/abs/1511.06581)
 * [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
+* [Reinforcement Learning through Asynchronous Advantage Actor-Critic on a GPU](https://arxiv.org/abs/1611.06256)
