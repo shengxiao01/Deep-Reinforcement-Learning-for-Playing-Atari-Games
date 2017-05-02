@@ -85,23 +85,13 @@ class DDQNet():
         conv2_out = tf.nn.conv2d(conv1_out, conv2_W, conv2_strides, 
                                           padding = 'VALID') + conv2_b
         conv2_out = tf.nn.relu(conv2_out)
-        
-        
-        ###########################################################
-        # conv layer 3, 3*3*64 filters
-        conv3_W = tf.Variable(tf.truncated_normal([3, 3, 64, 64], stddev = 0.01))
-        conv3_b = tf.Variable(tf.truncated_normal([1, 7, 7, 64], stddev = 0.01))
-        conv3_strides = [1, 1, 1, 1]
-        # output 7*7*64
-        conv3_out = tf.nn.conv2d(conv2_out, conv3_W, conv3_strides, 
-                                          padding = 'VALID') + conv3_b
-        conv3_out = tf.nn.relu(conv3_out)
+       
 
         ###########################################################
         # fully connected layer 1, (7*7*64 = 3136) * 512
-        ff1_input = tf.reshape(conv3_out, [-1, 3136])
-        ff1_W = tf.Variable(tf.truncated_normal([3136, 512], stddev = 0.01))
-        ff1_b = tf.Variable(tf.truncated_normal([1, 512], stddev = 0.01))
+        ff1_input = tf.reshape(conv2_out, [-1, 5184])
+        ff1_W = tf.Variable(tf.truncated_normal([5184, 256], stddev = 0.01))
+        ff1_b = tf.Variable(tf.truncated_normal([1, 256], stddev = 0.01))
         # output batch_size * 512
         ff1_out = tf.matmul(ff1_input, ff1_W) + ff1_b
         ff1_out = tf.nn.relu(ff1_out)
@@ -109,8 +99,8 @@ class DDQNet():
         
         advantage_in, value_in = tf.split(ff1_out, 2, axis = 1)
         
-        advantage_W = tf.Variable(tf.truncated_normal([256, self.action_space], stddev = 0.01))
-        value_W = tf.Variable(tf.truncated_normal([256, 1], stddev = 0.01))
+        advantage_W = tf.Variable(tf.truncated_normal([128, self.action_space], stddev = 0.01))
+        value_W = tf.Variable(tf.truncated_normal([128, 1], stddev = 0.01))
         
         advantage_out = tf.matmul(advantage_in, advantage_W)
         

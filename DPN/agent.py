@@ -11,7 +11,7 @@ class Agent():
     
     def __init__(self):
 
-        self.env = gym.make('Pong-v0')
+        self.env = gym.make(Params['GAME'])
         
         # setting up parameters
         self.frame_skip = Params['FRAME_SKIP']
@@ -50,11 +50,12 @@ class Agent():
 
             while True:
                 # select an action based on the predicted policy
-                observation, action, reward, done = self.take_action(state)
+                current_state = np.expand_dims(state[:,:,-1] - state[:,:,-2], axis = 2)
+                observation, action, reward, done = self.take_action(current_state)
                 reward_sum += reward
                 
                 # save the current state
-                state_sequence.append(state)
+                state_sequence.append(current_state)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
                 
@@ -95,7 +96,6 @@ class Agent():
             future_rewards[t] = running_add
             
         self.nn.train(self.sess, states, actions, future_rewards)
-        print(self.nn.predict_policy(self.sess, states[20:22]))
         
             
     def test(self):
@@ -122,7 +122,7 @@ class Agent():
     def process_frame(self, frame):
         #frame_gray = frame * np.array(([0.21, 0.72, 0.07])) / 256
         # output shape 105X80
-        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32') / 128 - 1
+        return np.mean(frame[::2,::2], axis = 2, dtype = 'float32') / 256
     
     
     def reset_game(self):

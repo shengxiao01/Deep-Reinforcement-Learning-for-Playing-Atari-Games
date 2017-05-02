@@ -7,7 +7,7 @@ import threading
 import time
 
 def main():
-
+    
     tf.reset_default_graph()
     graph = tf.Graph()
     sess = tf.Session(graph=graph)
@@ -36,7 +36,7 @@ def main():
     sess.run(init_op)
     logger.add_saver(sess, saver)
     logger.restore()
-    
+    graph.finalize()
     
     training_thread = []
     for id, agent in enumerate(local_agent):
@@ -48,9 +48,11 @@ def main():
     return local_agent, training_thread
         
 if __name__ == "__main__":
-    local_agent, training_thread = main()    
-#%%
-for (agent, agent_thread) in zip(local_agent, training_thread):
-    agent.exit = True
-    time.sleep(0.5)
-    agent_thread.join(1)
+    local_agent, training_thread = main()   
+    
+
+##%%
+#for (agent, agent_thread) in zip(local_agent, training_thread):
+#    agent.exit = True
+#    time.sleep(0.5)
+#    agent_thread.join(1)

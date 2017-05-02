@@ -13,6 +13,8 @@ import numpy as np
 
 
 Params = {
+        
+        'GAME': 'Pong-v0',
 
         'LEARNING_RATE': 0.00025,
         
@@ -46,4 +48,4 @@ Params = {
         
         'ENTROPY_PENALTY': 0.01,
         
-        'THREAD_NUM': 4}
+        'THREAD_NUM': 16}

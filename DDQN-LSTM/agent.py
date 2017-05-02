@@ -12,7 +12,7 @@ class Agent():
     
     def __init__(self):
 
-        self.env = gym.make('Pong-v0')
+        self.env = gym.make(Params['GAME'])
         
         # setting up parameters
         self.batch_size = Params['BATCH_SIZE']

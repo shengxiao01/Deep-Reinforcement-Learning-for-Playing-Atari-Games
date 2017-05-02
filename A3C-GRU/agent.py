@@ -5,8 +5,8 @@ import gym
 from a3c import A3CNet
 from logger import Logger
 from params import Params
+import resource
 
-  
 class Agent():
     
     def __init__(self, id, scope_name, sess, logger, optimizer, global_scope = None):
@@ -31,8 +31,8 @@ class Agent():
         
         self.reward_sum = 0
         self.state = np.zeros((self.IMG_X, self.IMG_Y, 1), dtype = 'float32')
-        self.rnn_state = (np.zeros([1, self.rnn_h_units]),np.zeros([1, self.rnn_h_units]))
-        self.rnn_state_init = (np.zeros([1, self.rnn_h_units]),np.zeros([1, self.rnn_h_units]))
+        self.rnn_state = np.zeros([1, self.rnn_h_units])
+        self.rnn_state_init = np.zeros([1, self.rnn_h_units])
          
         self.local_nn = A3CNet(self.__scope_name, self.action_space, self.__sess, self.__opt, global_scope)
            
@@ -54,9 +54,9 @@ class Agent():
             for t in range(self.update_freq):
                 # take actions
                 observation, reward, action, done, self.rnn_state = self.take_action(self.state, self.rnn_state)
-                
+
                 self.reward_sum += reward
-                
+
                 # record game progress
                 frame_sequence[t, :, :, :] = self.state
                 action_sequence[t] = action
@@ -69,19 +69,26 @@ class Agent():
                     break
 
             R_sequence[t+1] = 0 if done else self.get_value(self.state, self.rnn_state)
+            reward_sequence = np.clip(reward_sequence, -1, 1)
+            for idx in range(t, -1, -1):
+                R_sequence[idx] = self.reward_discount * R_sequence[idx+1] + reward_sequence[idx]
+            '''
             R_sequence[t+1] = np.clip(R_sequence[t+1], -1, 1)
-    
             for idx in range(t, -1, -1):
                 if reward_sequence[idx] != 0:
                     R_sequence[idx] = reward_sequence[idx]
                 else:
                     R_sequence[idx] = self.reward_discount * R_sequence[idx+1]            
-
+            '''
+            
             self.update_nn(frame_sequence[0:t+1, :, :, :], action_sequence[0:t+1], R_sequence[0:t+1], self.rnn_state_init)
+            
             self.rnn_state_init = self.rnn_state
-    
+
             if done:
+                self.__logger.log(self.__thread_id, self.reward_sum)
                 self.reset_game()
+                
 
     def take_action(self, current_state, rnn_state):
     
@@ -102,8 +109,8 @@ class Agent():
         return self.local_nn.predict_value(np.expand_dims(state, axis = 0), rnn_state)
     
     def update_nn(self, states, actions, rewards, rnn_state_init):
-        
         self.local_nn.update_global(states, actions, rewards, rnn_state_init)
+        
         self.local_nn.sync_variables()
 
     def test(self):
@@ -116,15 +123,10 @@ class Agent():
     
     
     def reset_game(self):
-        #self.log()
-        self.__logger.log(self.__thread_id, self.reward_sum)
 
-        
         observation = self.env.reset()
         self.state.fill(0)
-        self.rnn_state[0].fill(0)
-        self.rnn_state[1].fill(0)
-        self.rnn_state_init[0].fill(0)
-        self.rnn_state_init[1].fill(0)
+        self.rnn_state.fill(0)
+        self.rnn_state_init.fill(0)
         self.state[:,:,-1] = self.process_frame(observation)
         self.reward_sum = 0

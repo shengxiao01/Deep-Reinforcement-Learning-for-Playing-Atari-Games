@@ -17,6 +17,8 @@ import os
 
 Params = {
 
+        'GAME':'Pong-v0',
+
         'LEARNING_RATE': 0.00025,
         
         'BATCH_SIZE':  32,
@@ -37,7 +39,7 @@ Params = {
         
         'SAVE_FREQ': 200,
         
-        'MEMORY_BUFFER_SIZE': 100,
+        'MEMORY_BUFFER_SIZE': 200,
         
         'SAVE_PATH': './log/',
         
@@ -47,6 +49,6 @@ Params = {
         
         'IMG_Z': 4,
         
-        'RNN_H_UNIT': 512,
+        'RNN_H_UNIT': 256,
         
         'RNN_SEQUENCE_LENGTH': 8}

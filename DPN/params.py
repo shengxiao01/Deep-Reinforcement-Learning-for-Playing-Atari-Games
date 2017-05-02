@@ -10,21 +10,13 @@ import numpy as np
 
 
 
-
-
 Params = {
+
+        'GAME': 'Pong-v0',
 
         'LEARNING_RATE': 0.00025,
         
-        'BATCH_SIZE':  32,
-        
         'REWARD_DISCOUNT': 0.99,
-        
-        'RANDOM_ACTION_PROB_START': 0.9,
-        
-        'RANDOM_ACTION_PROB_END': 0.1,
-        
-        'ANNEALING_STEP': 50000,
         
         'FRAME_SKIP': 2,
         
@@ -32,9 +24,7 @@ Params = {
         
         'UPDATE_FREQ': 4,
         
-        'SAVE_FREQ': 200,
-        
-        'MEMORY_BUFFER_SIZE': 20000,
+        'SAVE_FREQ': 2000,
         
         'SAVE_PATH': './log/',
         
@@ -42,8 +32,8 @@ Params = {
         
         'IMG_Y': 80,
         
-        'IMG_Z': 4,
+        'IMG_Z': 1,
         
-        'ENTROPY_PENALTY': 0.01,
+        'ENTROPY_PENALTY': 0,
         
         'MIN_POLICY': 0.02}

@@ -17,6 +17,8 @@ import os
 
 Params = {
 
+        'GAME': 'Pong-v0',
+
         'LEARNING_RATE': 0.00025,
         
         'BATCH_SIZE':  32,
@@ -35,7 +37,7 @@ Params = {
         
         'UPDATE_FREQ': 4,
         
-        'SAVE_FREQ': 200,
+        'SAVE_FREQ': 1000,
         
         'MEMORY_BUFFER_SIZE': 20000,
         

@@ -46,6 +46,6 @@ Params = {
         
         'ENTROPY_PENALTY': 0.01,
         
-        'THREAD_NUM': 4,
+        'THREAD_NUM': 16,
         
-        'RNN_H_UNITS': 512}
+        'RNN_H_UNITS': 256}

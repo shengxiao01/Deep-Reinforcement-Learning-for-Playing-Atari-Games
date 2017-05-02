@@ -47,8 +47,3 @@ def main():
         
 if __name__ == "__main__":
     main()    
-#%%
-for (agent, agent_thread) in zip(local_agent, training_thread):
-    agent.exit = True
-    time.sleep(0.5)
-    agent_thread.join(1)

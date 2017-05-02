@@ -78,27 +78,17 @@ class DPNet():
         
         
         ###########################################################
-        # conv layer 3, 3*3*64 filters
-        conv3_W = tf.Variable(tf.truncated_normal([3, 3, 64, 64], stddev = 0.01))
-        conv3_b = tf.Variable(tf.truncated_normal([1, 7, 7, 64], stddev = 0.01))
-        conv3_strides = [1, 1, 1, 1]
-        # output 7*7*64
-        conv3_out = tf.nn.conv2d(conv2_out, conv3_W, conv3_strides, 
-                                          padding = 'VALID') + conv3_b
-        conv3_out = tf.nn.relu(conv3_out)
-
-        ###########################################################
         # fully connected layer 1, (7*7*64 = 3136) * 512
-        ff1_input = tf.reshape(conv3_out, [-1, 3136])
-        ff1_W = tf.Variable(tf.truncated_normal([3136, 512], stddev = 0.01))
-        ff1_b = tf.Variable(tf.truncated_normal([1, 512], stddev = 0.01))
+        ff1_input = tf.reshape(conv2_out, [-1, 5184])
+        ff1_W = tf.Variable(tf.truncated_normal([5184, 256], stddev = 0.01))
+        ff1_b = tf.Variable(tf.truncated_normal([1, 256], stddev = 0.01))
         # output batch_size * 512
         ff1_out = tf.matmul(ff1_input, ff1_W) + ff1_b
         ff1_out = tf.nn.relu(ff1_out)
         
         
         ##################################################################
-        ff2_W = tf.Variable(tf.truncated_normal([ 512, self.action_space],
+        ff2_W = tf.Variable(tf.truncated_normal([ 256, self.action_space],
                                                          stddev = 0.01))
         ff2_b = tf.Variable(tf.truncated_normal([ 1, self.action_space],
                                                          stddev = 0.01))        
@@ -106,8 +96,6 @@ class DPNet():
         ff2_out = tf.matmul(ff1_out, ff2_W) + ff2_b
         
         policy_out = tf.nn.softmax(ff2_out)
-        #policy_out = tf.clip_by_value(policy_out, Params['MIN_POLICY'], 1)
-        #policy_out = tf.divide(policy_out, tf.reduce_sum(policy_out, axis = 1, keep_dims=True))
         
         return state_in, policy_out
 

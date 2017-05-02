@@ -1,6 +1,6 @@
 import tensorflow as tf
 from params import Params
-
+import resource
 class A3CNet():
     def __init__(self, scope, action_space, session, optimizer, global_scope = None):
         
@@ -30,7 +30,7 @@ class A3CNet():
                 self.sync_op.append(to_var.assign(from_var.value()))            
         
     def build_nn(self):
-        
+
         # [batch, in_height, in_width, in_channels]
         # assuming input to be batch_size*84*84*4
         state_in = tf.placeholder(tf.float32, shape=[None, self.IMG_X, self.IMG_Y, self.IMG_Z])
@@ -58,33 +58,23 @@ class A3CNet():
         # output 9*9*64
         conv2_out = tf.nn.conv2d(conv1_out, conv2_W, conv2_strides, padding = 'VALID') + conv2_b
         conv2_out = tf.nn.relu(conv2_out)
-        
-        
-        ###########################################################
-        # conv layer 3, 3*3*64 filters
-        conv3_W = tf.Variable(tf.truncated_normal([3, 3, 64, 64], stddev = 0.01))
-        conv3_b = tf.Variable(tf.truncated_normal([1, 7, 7, 64], stddev = 0.01))
-        conv3_strides = [1, 1, 1, 1]
-        # output 7*7*64
-        conv3_out = tf.nn.conv2d(conv2_out, conv3_W, conv3_strides, padding = 'VALID') + conv3_b
-        conv3_out = tf.nn.relu(conv3_out)
 
         ###########################################################
         # fully connected layer 1, (7*7*64 = 3136) * 512
-        ff1_input = tf.reshape(conv3_out, [-1, 3136])
-        ff1_W = tf.Variable(tf.truncated_normal([3136, 512], stddev = 0.01))
-        ff1_b = tf.Variable(tf.truncated_normal([1, 512], stddev = 0.01))
+        ff1_input = tf.reshape(conv2_out, [-1, 5184])
+        ff1_W = tf.Variable(tf.truncated_normal([5184, 256], stddev = 0.01))
+        ff1_b = tf.Variable(tf.truncated_normal([1, 256], stddev = 0.01))
         # output batch_size * 512
         ff1_out = tf.matmul(ff1_input, ff1_W) + ff1_b
         ff1_out = tf.nn.relu(ff1_out)
         
         
-        policy_W = tf.Variable(tf.truncated_normal([512, self.action_space], stddev = 0.01))
+        policy_W = tf.Variable(tf.truncated_normal([256, self.action_space], stddev = 0.01))
         policy_b = tf.Variable(tf.truncated_normal([1, self.action_space], stddev = 0.01))
 
         policy_out = tf.nn.softmax(tf.matmul(ff1_out, policy_W) + policy_b)
         
-        value_W = tf.Variable(tf.truncated_normal([512, 1], stddev = 0.01))
+        value_W = tf.Variable(tf.truncated_normal([256, 1], stddev = 0.01))
         value_out = tf.matmul(ff1_out, value_W)        
         
         ###########################################################
@@ -112,7 +102,7 @@ class A3CNet():
         variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope)
         
         grad = tf.gradients(total_loss, variables)
-        
+
         model_dict = {'state_in': state_in, 'action_in': actions, 'R_in': R, 'policy_out': policy_out, 
                       'value_out': value_out,'gradients': grad, 'variables': variables}
         
@@ -137,8 +127,10 @@ class A3CNet():
         self.__sess.run(self.sync_op)
         
     def update_global(self, state, action, R):
+        #print('8id: %d, Memory usage: %s (kb)' % (1,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
         self.__sess.run(self.apply_gradient,
                 feed_dict = {
                 self.local_dict['state_in']: state,
                 self.local_dict['action_in']: action,
                 self.local_dict['R_in']: R})
+        #print('9id: %d, Memory usage: %s (kb)' % (1,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))

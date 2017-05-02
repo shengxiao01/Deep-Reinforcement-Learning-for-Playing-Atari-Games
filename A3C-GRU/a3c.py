@@ -1,6 +1,6 @@
 import tensorflow as tf
 from params import Params
-
+import resource
 class A3CNet():
     def __init__(self, scope, action_space, session, optimizer, global_scope = None):
         
@@ -61,20 +61,12 @@ class A3CNet():
         conv2_out = tf.nn.relu(conv2_out)
         
         
-        ###########################################################
-        # conv layer 3, 3*3*64 filters
-        conv3_W = tf.Variable(tf.truncated_normal([3, 3, 64, 64], stddev = 0.01))
-        conv3_b = tf.Variable(tf.truncated_normal([1, 7, 7, 64], stddev = 0.01))
-        conv3_strides = [1, 1, 1, 1]
-        # output 7*7*64
-        conv3_out = tf.nn.conv2d(conv2_out, conv3_W, conv3_strides, padding = 'VALID') + conv3_b
-        conv3_out = tf.nn.relu(conv3_out)
 
         ###########################################################
         # fully connected layer 1, (7*7*64 = 3136) * 512
-        ff1_input = tf.reshape(conv3_out, [-1, 3136])
-        ff1_W = tf.Variable(tf.truncated_normal([3136, 512], stddev = 0.01))
-        ff1_b = tf.Variable(tf.truncated_normal([1, 512], stddev = 0.01))
+        ff1_input = tf.reshape(conv2_out, [-1, 5184])
+        ff1_W = tf.Variable(tf.truncated_normal([5184, self.rnn_h_units], stddev = 0.01))
+        ff1_b = tf.Variable(tf.truncated_normal([1, self.rnn_h_units], stddev = 0.01))
         # output batch_size * 512
         ff1_out = tf.matmul(ff1_input, ff1_W) + ff1_b
         ff1_out = tf.nn.relu(ff1_out)
@@ -84,16 +76,14 @@ class A3CNet():
         
         rnn_in = tf.reshape(ff1_out, [1, -1, self.rnn_h_units])
         
-        rnn_cell = tf.contrib.rnn.core_rnn_cell.LSTMCell(num_units = self.rnn_h_units)
+        rnn_cell = tf.contrib.rnn.GRUCell(num_units = self.rnn_h_units)
         
-        rnn_c_in = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
         rnn_h_in = tf.placeholder(shape=[None, self.rnn_h_units],dtype=tf.float32)
-        rnn_state_in = tf.contrib.rnn.LSTMStateTuple(rnn_c_in, rnn_h_in)
         
         rnn, rnn_state_out = tf.nn.dynamic_rnn(inputs=rnn_in, 
 												 cell=rnn_cell, 
 												 dtype=tf.float32, 
-												 initial_state=rnn_state_in)
+												 initial_state=rnn_h_in)
         rnn_out = tf.reshape(rnn, [-1, self.rnn_h_units])  
               
         ############################################################
@@ -133,8 +123,7 @@ class A3CNet():
         
         grad = tf.gradients(total_loss, variables)
         
-        model_dict = {'state_in': state_in, 'action_in': actions, 'R_in': R, 
-                      'rnn_c_in': rnn_c_in, 'rnn_h_in': rnn_h_in,
+        model_dict = {'state_in': state_in, 'action_in': actions, 'R_in': R, 'rnn_h_in': rnn_h_in,
                       'policy_out': policy_out, 'value_out': value_out, 'rnn_state_out': rnn_state_out,
                       'gradients': grad, 'variables': variables}
         
@@ -145,29 +134,32 @@ class A3CNet():
         return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.__scope.name)
     
     def predict_value(self, state, rnn_state):
+        #a1=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         value = self.__sess.run(self.local_dict['value_out'],
                           feed_dict = {self.local_dict['state_in']: state,
-						  self.local_dict['rnn_c_in']: rnn_state[0],
-						  self.local_dict['rnn_h_in']: rnn_state[1]})
+                          self.local_dict['rnn_h_in']: rnn_state})
+        #print('9id: %d, Memory usage: %s (kb)' % (1,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss-a1))
         return value
         
     def predict_policy(self, state, rnn_state):
         # 1X80X80X4 single image
+        #a1=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         policy, rnn_state = self.__sess.run([self.local_dict['policy_out'], self.local_dict['rnn_state_out']],
                           feed_dict = {self.local_dict['state_in']: state,
-                          self.local_dict['rnn_c_in']: rnn_state[0],
-                          self.local_dict['rnn_h_in']: rnn_state[1]})
+                          self.local_dict['rnn_h_in']: rnn_state})
+        #print('9id: %d, Memory usage: %s (kb)' % (1,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss-a1))
         return policy, rnn_state
     
     def sync_variables(self):
         self.__sess.run(self.sync_op)
         
-    def update_global(self, state, action, R, rnn_state):
-
+    def update_global(self, state, action, R, rnn_state_in):
+        #a1=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         self.__sess.run(self.apply_gradient,
                 feed_dict = {
                 self.local_dict['state_in']: state,
                 self.local_dict['action_in']: action,
-                self.local_dict['R_in']: R,
-                self.local_dict['rnn_c_in']: rnn_state[0],
-                self.local_dict['rnn_h_in']: rnn_state[1]})
+                self.local_dict['rnn_h_in']: rnn_state_in,
+                self.local_dict['R_in']: R})
+        #print('9id: %d, Memory usage: %s (kb)' % (1,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss-a1))
+        
